@@ -258,6 +258,11 @@ impl pa_tui::interactive::OnboardingSink for SettingsOnboardingSink {
     }
 }
 
+/// This fork never mounts the first-run flow: a first launch opens straight into the session,
+/// sign-in goes through `/login` and model choice through `/model`. Trace sharing keeps its
+/// off default because the flow never writes the choice. The flow code stays for upstream merges.
+const FORK_SKIPS_FIRST_RUN: bool = true;
+
 /// First launch is defined by the settings flag alone — credentials found on
 /// disk never skip the flow, they only make the sign-in step instant. The task
 /// carries the startup model state (the readiness probe decides the branch and
@@ -272,7 +277,7 @@ pub(super) fn onboarding_task(
 ) {
     let config = &options.config;
     let settings = pa_core::settings::SettingsManager::create(&config.cwd, &config.agent_dir);
-    if settings.get_onboarding_shown() {
+    if FORK_SKIPS_FIRST_RUN || settings.get_onboarding_shown() {
         return (None, Vec::new());
     }
     let probe = StartupModelProbe {

@@ -209,6 +209,33 @@ fn continue_recent_view_gates_on_onboarding_and_the_flag() {
 }
 
 #[test]
+fn a_fresh_home_opens_without_the_first_run_flow() {
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let options = RunOptions {
+        app_mode: crate::mode::AppMode::Interactive,
+        config: crate::mode::RuntimeConfig {
+            cwd: dir.path().to_path_buf(),
+            agent_dir: dir.path().join("agent"),
+            ..Default::default()
+        },
+        session: crate::mode::SessionOptions::default(),
+        messages: Vec::new(),
+        file_args: Vec::new(),
+        daemon_socket: None,
+        list_models: None,
+        initial_message: None,
+        initial_images: Vec::new(),
+        verbose: false,
+        offline: false,
+        agents_view_requested: false,
+        attach_agent: None,
+    };
+    let (task, stages) = onboarding_task(&options, None);
+    assert!(task.is_none() && stages.is_empty());
+}
+
+#[test]
+#[ignore = "the fork never mounts the first-run flow (FORK_SKIPS_FIRST_RUN)"]
 fn onboarding_gate_follows_settings_and_auth() {
     use crate::mode::{AppMode, RuntimeConfig};
 
