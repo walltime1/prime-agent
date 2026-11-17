@@ -96,7 +96,7 @@ fn request_body_json(request: &[u8]) -> Value {
 
 /// Stream one minimal completion against `model` and return the JSON body
 /// the provider put on the wire.
-async fn wire_body_for(model: Value) -> Value {
+async fn wire_body_for(model: Value, reasoning: Option<crate::types::ModelThinkingLevel>) -> Value {
     let body = sse_body(&[json!({
         "id": "m", "object": "chat.completion.chunk", "model": model["id"],
         "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }],
@@ -114,6 +114,7 @@ async fn wire_body_for(model: Value) -> Value {
             api_key: Some("test".into()),
             ..Default::default()
         },
+        reasoning,
         ..Default::default()
     };
     let mut reader = crate::providers::openai_completions::stream_simple_openai_completions(
@@ -143,7 +144,7 @@ async fn an_explicitly_configured_max_tokens_reaches_the_wire_unchanged() {
     // Issue #755's exact configuration: a models.json entry asking for
     // `"maxTokens": 131072`. The configured cap reaches the provider
     // unchanged — the captured body must not show the silent 32000.
-    let body = wire_body_for(glm_model(131_072, true)).await;
+    let body = wire_body_for(glm_model(131_072, true), /*reasoning*/ None).await;
     assert_eq!(body["max_tokens"], json!(131_072));
 }
 
@@ -153,7 +154,7 @@ async fn a_catalog_model_stays_capped_at_the_default_output_ceiling() {
     // ceiling the request clamps to 32000 (TS `DEFAULT_MAX_OUTPUT_TOKENS`)
     // — most catalog models declare far more than a turn needs, so their
     // request size must not change.
-    let body = wire_body_for(glm_model(131_072, false)).await;
+    let body = wire_body_for(glm_model(131_072, false), /*reasoning*/ None).await;
     assert_eq!(body["max_tokens"], json!(32_000));
 }
 
@@ -161,7 +162,29 @@ async fn a_catalog_model_stays_capped_at_the_default_output_ceiling() {
 async fn a_model_without_max_tokens_sends_no_output_budget() {
     // A model that declares no max output (0) sends neither budget field:
     // the provider defaults server-side.
-    let body = wire_body_for(glm_model(0, false)).await;
+    let body = wire_body_for(glm_model(0, false), /*reasoning*/ None).await;
     assert!(body.get("max_tokens").is_none());
     assert!(body.get("max_completion_tokens").is_none());
+}
+
+#[tokio::test]
+async fn a_qwen_chat_template_request_carries_the_mapped_reasoning_effort() {
+    // gx10's vLLM Qwen scales its thinking with `reasoning_effort` in the chat template
+    // kwargs; the level map translates the session level (minimal -> low) and off omits it.
+    let mut model = glm_model(32_768, true);
+    model["thinkingLevelMap"] = json!({ "off": "none", "minimal": "low", "low": "low" });
+    let minimal = wire_body_for(
+        model.clone(),
+        Some(crate::types::ModelThinkingLevel::Minimal),
+    )
+    .await;
+    assert_eq!(
+        minimal["chat_template_kwargs"],
+        json!({ "enable_thinking": true, "preserve_thinking": true, "reasoning_effort": "low" })
+    );
+    let off = wire_body_for(model, Some(crate::types::ModelThinkingLevel::Off)).await;
+    assert_eq!(
+        off["chat_template_kwargs"],
+        json!({ "enable_thinking": false, "preserve_thinking": true })
+    );
 }

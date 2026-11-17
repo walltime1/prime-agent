@@ -99,13 +99,21 @@ pub(crate) fn build_params(
                 );
             }
             crate::types::ThinkingFormat::QwenChatTemplate => {
-                params.insert(
-                    "chat_template_kwargs".into(),
-                    json!({
-                        "enable_thinking": options.reasoning_effort.is_some(),
-                        "preserve_thinking": true,
-                    }),
-                );
+                let mut kwargs = json!({
+                    "enable_thinking": options.reasoning_effort.is_some(),
+                    "preserve_thinking": true,
+                });
+                // Chat templates that read `reasoning_effort` scale the thinking depth with it;
+                // without it, any enabled level thinks at the template's full default depth.
+                if let Some(effort) = options.reasoning_effort {
+                    let mapped = model
+                        .thinking_level_map_value(effort)
+                        .flatten()
+                        .cloned()
+                        .unwrap_or_else(|| effort.wire_name().to_string());
+                    kwargs["reasoning_effort"] = json!(mapped);
+                }
+                params.insert("chat_template_kwargs".into(), kwargs);
             }
             crate::types::ThinkingFormat::Deepseek => {
                 params.insert(
