@@ -8,9 +8,9 @@ use serde_json::Value;
 
 use crate::theme::{Theme, ThemeBg, ThemeColor};
 
-/// The compact 7-row Walltime mark: a pillar, a clock, and a sloped roof
-/// with its post. [`WALLTIME_LOGO_MASK`] colours each cell.
-pub const WALLTIME_LOGO: [&str; 7] = [
+/// The compact 7-row fork mark: a pillar, a clock, and a sloped roof
+/// with its post. [`LOGO_MASK`] colours each cell.
+pub const LOGO: [&str; 7] = [
     "   ▄▄▄▄▄▄▖     ",
     "▄▄ ▀▀▀▀▀▀▀▀▀▄▄▄",
     "██  ▄▀▀▀▀▀▄  ██",
@@ -20,9 +20,9 @@ pub const WALLTIME_LOGO: [&str; 7] = [
     "▀▀           ▀▀",
 ];
 
-/// Per-cell colour of [`WALLTIME_LOGO`]: `t` is the brand teal, anything
+/// Per-cell colour of [`LOGO`]: `t` is the brand teal, anything
 /// else the theme text colour (the mark's navy would vanish on dark canvases).
-const WALLTIME_LOGO_MASK: [&str; 7] = [
+const LOGO_MASK: [&str; 7] = [
     "   ttttttt     ",
     "nn tttttttttttt",
     "nn  nnnnnnn  tt",
@@ -32,29 +32,26 @@ const WALLTIME_LOGO_MASK: [&str; 7] = [
     "nn           tt",
 ];
 
-const WALLTIME_TEAL: (u8, u8, u8) = (3, 160, 180);
+const LOGO_TEAL: (u8, u8, u8) = (3, 160, 180);
 
-fn walltime_teal(theme: &Theme) -> Style {
+fn logo_teal_style(theme: &Theme) -> Style {
     let color = match theme.mode {
         crate::theme::ColorMode::Color256 => {
-            ratatui::style::Color::Indexed(crate::theme::rgb_to_256(WALLTIME_TEAL))
+            ratatui::style::Color::Indexed(crate::theme::rgb_to_256(LOGO_TEAL))
         }
         crate::theme::ColorMode::TrueColor => {
-            ratatui::style::Color::Rgb(WALLTIME_TEAL.0, WALLTIME_TEAL.1, WALLTIME_TEAL.2)
+            ratatui::style::Color::Rgb(LOGO_TEAL.0, LOGO_TEAL.1, LOGO_TEAL.2)
         }
     };
     Style::default().fg(color)
 }
 
 /// One logo row split into same-colour runs.
-fn walltime_logo_spans(row: usize, text: Style, teal: Style) -> Vec<Span> {
+fn logo_spans(row: usize, text: Style, teal: Style) -> Vec<Span> {
     let mut spans: Vec<Span> = Vec::new();
     let mut run = String::new();
     let mut run_is_teal = false;
-    for (glyph, mask) in WALLTIME_LOGO[row]
-        .chars()
-        .zip(WALLTIME_LOGO_MASK[row].chars())
-    {
+    for (glyph, mask) in LOGO[row].chars().zip(LOGO_MASK[row].chars()) {
         let is_teal = mask == 't';
         if is_teal != run_is_teal && !run.is_empty() {
             spans.push(Span::styled(
@@ -411,14 +408,14 @@ pub fn render_top_bar(state: &ChromeState, theme: &Theme, width: usize) -> Line 
     line
 }
 
-/// The brand splash: Walltime logo beside the version/model/cwd metadata
+/// The brand splash: fork logo beside the version/model/cwd metadata
 /// (TS `BrandSplashHeader`, `topPadding` always on).
 #[must_use]
 pub fn render_splash(state: &ChromeState, theme: &Theme, width: usize) -> Vec<Line> {
     let safe_width = width.max(1);
     let padding_x = usize::from(safe_width > 1);
     let content_width = safe_width.saturating_sub(padding_x * 2).max(1);
-    let logo_raw = WALLTIME_LOGO;
+    let logo_raw = LOGO;
     let logo_canvas_width = logo_raw
         .iter()
         .map(|line| str_width(line))
@@ -491,7 +488,7 @@ pub fn render_splash(state: &ChromeState, theme: &Theme, width: usize) -> Vec<Li
         0
     };
     let logo_text = theme.fg_style(ThemeColor::Text);
-    let logo_teal = walltime_teal(theme);
+    let logo_teal = logo_teal_style(theme);
     for index in 0..row_count {
         let mut spans: Line = Vec::new();
         let pad = if padding_x > 0 { " " } else { "" };
@@ -499,7 +496,7 @@ pub fn render_splash(state: &ChromeState, theme: &Theme, width: usize) -> Vec<Li
         if show_logo {
             let logo_line = logo_raw.get(index).copied().unwrap_or("");
             if index < logo_raw.len() {
-                spans.extend(walltime_logo_spans(index, logo_text, logo_teal));
+                spans.extend(logo_spans(index, logo_text, logo_teal));
             }
             let fill = logo_canvas_width.saturating_sub(str_width(logo_line)) + gutter;
             spans.push(Span::styled(" ".repeat(fill), Style::default()));
