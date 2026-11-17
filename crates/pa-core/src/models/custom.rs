@@ -419,7 +419,13 @@ pub fn load_custom_models(
                 .or_else(|| provider_config.base_url.clone())
                 .or_else(|| defaults.as_ref().map(|(_, url)| url.clone()));
             let Some(base_url) = base_url else { continue };
-            let compat = merge_compat(None, compat_from_value(provider_config.compat.as_ref()));
+            // The model's own compat wins over the provider's, key by key.
+            let provider_compat =
+                merge_compat(None, compat_from_value(provider_config.compat.as_ref()));
+            let compat = match compat_from_value(model_def.compat.as_ref()) {
+                Some(model_compat) => merge_compat(provider_compat.as_ref(), Some(model_compat)),
+                None => provider_compat,
+            };
             result.models.push(Model {
                 id: model_def.id.clone(),
                 name: model_def
@@ -503,6 +509,35 @@ mod tests {
         assert_eq!(result.models[0].id, "llama3");
         assert_eq!(result.models[0].base_url, "http://localhost:11434");
         assert_eq!(result.models[0].context_window, 128_000);
+    }
+
+    #[test]
+    fn a_model_definition_compat_layers_over_the_provider_compat() {
+        let result = load_custom_models(
+            r#"{ "providers": { "gx10": {
+                "baseUrl": "http://gx10/v1",
+                "apiKey": "none",
+                "api": "openai-completions",
+                "compat": { "supportsStore": false, "maxTokensField": "max_completion_tokens" },
+                "models": [ { "id": "qwen", "compat": {
+                    "maxTokensField": "max_tokens", "thinkingFormat": "qwen-chat-template"
+                } } ]
+            } } }"#,
+            &|_| false,
+            &|_| None,
+        );
+        assert!(result.error.is_none());
+        assert_eq!(
+            result.models[0]
+                .compat
+                .as_ref()
+                .map(|compat| serde_json::Value::Object(compat.raw.clone())),
+            Some(serde_json::json!({
+                "supportsStore": false,
+                "maxTokensField": "max_tokens",
+                "thinkingFormat": "qwen-chat-template"
+            }))
+        );
     }
 
     #[test]
