@@ -6,6 +6,7 @@ use super::planner::{
     RefinementProposal, AUTO_REFINE_REVIEW_MAX_OUTPUT_TOKENS, AUTO_REFINE_REVIEW_SYSTEM_PROMPT,
     REFINEMENT_MAX_OUTPUT_TOKENS, REFINEMENT_SYSTEM_PROMPT,
 };
+use super::ranking::entry_review_due;
 use super::{
     infer_refinement_result_scope, merge_refinement_history, HarnessScope, HarnessState,
     RefinementKind, RefinementResult, REFINEMENT_KINDS,
@@ -36,9 +37,14 @@ pub fn generate_refinement_id() -> String {
 }
 
 /// Harness overview section for the refine prompt (per-kind, 40-entry cap,
-/// 240-char content/ref/args snippets).
+/// 240-char content/ref/args snippets). Entries past their `reviewAfter`
+/// carry a `(review due)` marker.
 #[must_use]
 pub fn overview_for_prompt(state: &HarnessState) -> String {
+    let now_millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
     let mut lines: Vec<String> = Vec::new();
     for kind in REFINEMENT_KINDS {
         let entries: Vec<&super::HarnessEntry> = state
@@ -72,8 +78,13 @@ pub fn overview_for_prompt(state: &HarnessState) -> String {
                 Some(HarnessScope::Local) => "local",
                 _ => "global",
             };
+            let review_text = if entry_review_due(entry, Some(now_millis)) {
+                " (review due)"
+            } else {
+                ""
+            };
             lines.push(format!(
-                "- [{scope}:{}] {} ({}, v{}){}{}: {content}",
+                "- [{scope}:{}] {} ({}, v{}){review_text}{}{}: {content}",
                 entry.id, entry.title, entry.path, entry.version, reference_text, arguments_text
             ));
         }
@@ -580,6 +591,43 @@ mod tests {
         assert!(overview.contains("memory: 1"));
         assert!(overview.contains("- [local:m1] Fact (/m/m1, v0): builds are green"));
         assert_eq!(history_for_prompt(&[]), "No prior refinement history.");
+    }
+
+    #[test]
+    fn overview_marks_entries_past_their_review_date() {
+        let mut state = super::super::empty_harness_state();
+        for (id, review_after) in [
+            ("stale", "2000-01-01T00:00:00.000Z"),
+            ("fresh", "2999-01-01T00:00:00.000Z"),
+        ] {
+            let mut entry = super::super::HarnessEntry {
+                id: id.to_string(),
+                kind: RefinementKind::Memory,
+                title: id.to_string(),
+                content: "note".to_string(),
+                path: "general".to_string(),
+                scope: Some(HarnessScope::Local),
+                reference: serde_json::Map::default(),
+                arguments: serde_json::Map::default(),
+                metadata: serde_json::Map::default(),
+                source: "refine".to_string(),
+                created_at: String::new(),
+                updated_at: String::new(),
+                version: 1,
+            };
+            entry.metadata.insert(
+                super::super::REVIEW_AFTER_METADATA_KEY.to_string(),
+                review_after.into(),
+            );
+            state
+                .entries
+                .get_mut(&RefinementKind::Memory)
+                .unwrap()
+                .insert(id.to_string(), entry);
+        }
+        let overview = overview_for_prompt(&state);
+        assert!(overview.contains("- [local:stale] stale (general, v1) (review due): note"));
+        assert!(overview.contains("- [local:fresh] fresh (general, v1): note"));
     }
 
     #[tokio::test]

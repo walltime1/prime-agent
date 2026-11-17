@@ -22,6 +22,12 @@ pub const DEFAULT_OVERVIEW_ENTRY_LIMIT: usize = 3;
 pub const DEFAULT_OVERVIEW_REFINEMENT_LIMIT: usize = 10;
 pub const DEFAULT_OVERVIEW_CONTENT_LIMIT: usize = 140;
 
+/// `HarnessEntry.metadata` key holding the RFC 3339 instant after which a
+/// refinement-written entry is due for review.
+pub const REVIEW_AFTER_METADATA_KEY: &str = "reviewAfter";
+/// How long a refinement-written entry stays fresh before it is due for review.
+pub const REVIEW_AFTER_MILLIS: u64 = 90 * 24 * 60 * 60 * 1000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RefinementKind {

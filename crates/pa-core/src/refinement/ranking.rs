@@ -8,7 +8,8 @@ use sha2::{Digest, Sha256};
 use super::{
     compact_harness_text, HarnessEntry, HarnessState, RefinementKind,
     DEFAULT_OVERVIEW_CONTENT_LIMIT, DEFAULT_OVERVIEW_ENTRY_LIMIT,
-    DEFAULT_OVERVIEW_REFINEMENT_LIMIT, REFINEMENT_KINDS,
+    DEFAULT_OVERVIEW_REFINEMENT_LIMIT, REFINEMENT_KINDS, REVIEW_AFTER_METADATA_KEY,
+    REVIEW_AFTER_MILLIS,
 };
 
 /// Term -> weight, built from task signal (goal, recent messages).
@@ -178,6 +179,24 @@ fn entry_sort_key(entry: &HarnessEntry) -> String {
     format!("{}\0{}\0{}", entry.path, entry.title, entry.id)
 }
 
+/// Whether the entry is past its review date at `now_millis`. The date is the
+/// entry's `reviewAfter` metadata; a refinement-written entry saved before
+/// that stamp existed is due `REVIEW_AFTER_MILLIS` after its last update. Without
+/// a clock, or with an unparseable date, or for an entry no refinement wrote
+/// and that carries no date, an entry is never due.
+pub(crate) fn entry_review_due(entry: &HarnessEntry, now_millis: Option<u64>) -> bool {
+    let Some(now_millis) = now_millis else {
+        return false;
+    };
+    let review_after = match entry.metadata.get(REVIEW_AFTER_METADATA_KEY) {
+        Some(stamp) => stamp.as_str().and_then(crate::cron::parse_iso_millis),
+        None if entry.source == "refine" => crate::cron::parse_iso_millis(&entry.updated_at)
+            .map(|updated_millis| updated_millis + REVIEW_AFTER_MILLIS),
+        None => None,
+    };
+    review_after.is_some_and(|review_after| review_after < now_millis)
+}
+
 #[derive(Debug, Default)]
 pub struct HarnessStatePromptOptions {
     pub max_entries_per_kind: Option<usize>,
@@ -187,6 +206,9 @@ pub struct HarnessStatePromptOptions {
     pub include_shell_examples: bool,
     pub include_refine_examples: Option<bool>,
     pub query_terms: Option<HarnessQueryTerms>,
+    /// The instant entries are judged against for `reviewAfter` expiry; the
+    /// formatter stays pure by never reading the clock. `None` marks nothing due.
+    pub review_now_millis: Option<u64>,
 }
 
 /// Render the harness state as the model-facing digest block. Strings must
@@ -248,17 +270,21 @@ pub fn format_harness_state_for_prompt(
             Some(terms) if !terms.is_empty() => Some(harness_query_term_idf(&entries, terms)),
             _ => None,
         };
-        entries.sort_by(|a, b| match (query_terms.as_ref(), ranked_idf.as_ref()) {
-            (Some(terms), idf) if !terms.is_empty() => {
-                let left = score_harness_entry_for_query(b, terms, idf)
-                    .partial_cmp(&score_harness_entry_for_query(a, terms, idf))
-                    .unwrap_or(std::cmp::Ordering::Equal);
-                if left != std::cmp::Ordering::Equal {
-                    return left;
+        entries.sort_by(|a, b| {
+            let relevance = match (query_terms.as_ref(), ranked_idf.as_ref()) {
+                (Some(terms), idf) if !terms.is_empty() => {
+                    score_harness_entry_for_query(b, terms, idf)
+                        .partial_cmp(&score_harness_entry_for_query(a, terms, idf))
+                        .unwrap_or(std::cmp::Ordering::Equal)
                 }
-                entry_sort_key(a).cmp(&entry_sort_key(b))
-            }
-            _ => entry_sort_key(a).cmp(&entry_sort_key(b)),
+                _ => std::cmp::Ordering::Equal,
+            };
+            relevance
+                .then_with(|| {
+                    entry_review_due(a, options.review_now_millis)
+                        .cmp(&entry_review_due(b, options.review_now_millis))
+                })
+                .then_with(|| entry_sort_key(a).cmp(&entry_sort_key(b)))
         });
         total_entries += entries.len();
         let kind_name = kind;
@@ -309,13 +335,19 @@ pub fn format_harness_state_for_prompt(
                 Some(super::HarnessScope::Local) => "local",
                 _ => "global",
             };
+            let review_text = if entry_review_due(entry, options.review_now_millis) {
+                " (review due)"
+            } else {
+                ""
+            };
             lines.push(format!(
-                "- [{}:{}] {} ({}, v{}){}{}: {}",
+                "- [{}:{}] {} ({}, v{}){}{}{}: {}",
                 scope,
                 entry.id,
                 entry.title,
                 entry.path,
                 entry.version,
+                review_text,
                 reference_text,
                 arguments_text,
                 compact_harness_text(&entry.content, max_content_length)
@@ -381,6 +413,10 @@ pub struct HarnessDigestRenderFlags {
     pub include_ipython_examples: bool,
     pub include_shell_examples: bool,
     pub include_refine_examples: bool,
+    /// The instant `reviewAfter` expiry is judged at. The fingerprint folds in
+    /// each entry's due state, never the instant itself, so it only changes
+    /// when a `(review due)` marker appears.
+    pub review_now_millis: Option<u64>,
 }
 
 fn scope_name(entry: &HarnessEntry) -> &'static str {
@@ -438,6 +474,9 @@ pub fn harness_digest_fingerprint(
         material.insert("path".to_string(), serde_json::json!(entry.path));
         material.insert("version".to_string(), serde_json::json!(entry.version));
         material.insert("content".to_string(), serde_json::json!(entry.content));
+        if entry_review_due(entry, render_flags.review_now_millis) {
+            material.insert("reviewDue".to_string(), serde_json::json!(true));
+        }
         // Only skills render the kernel call contract, so another kind can
         // change these fields without changing a single digest byte.
         if entry.kind == RefinementKind::Skill {
@@ -699,6 +738,7 @@ mod tests {
             include_ipython_examples: true,
             include_shell_examples: false,
             include_refine_examples: false,
+            review_now_millis: None,
         };
         let baseline = harness_digest_fingerprint(&state, flags);
         let mut changed = state.clone();
@@ -732,6 +772,7 @@ mod tests {
             include_ipython_examples: true,
             include_shell_examples: false,
             include_refine_examples: false,
+            review_now_millis: None,
         };
         let baseline = harness_digest_fingerprint(&state, flags);
         // Kind iteration order is normalized away, as is the invisible
@@ -767,6 +808,7 @@ mod tests {
             include_ipython_examples: true,
             include_shell_examples: true,
             include_refine_examples: false,
+            review_now_millis: None,
         };
         assert_eq!(harness_digest_fingerprint(&state, shell_on), baseline);
         // Without IPython examples the shell contract renders, so the flag
@@ -775,6 +817,7 @@ mod tests {
             include_ipython_examples: false,
             include_shell_examples: true,
             include_refine_examples: false,
+            review_now_millis: None,
         };
         assert_ne!(harness_digest_fingerprint(&state, shell_only), baseline);
     }
@@ -816,6 +859,7 @@ mod tests {
             include_ipython_examples: true,
             include_shell_examples: false,
             include_refine_examples: true,
+            review_now_millis: None,
         };
         let baseline = harness_digest_fingerprint(&state, flags);
         // The skill's call contract participates; the same fields on a
@@ -911,5 +955,89 @@ mod tests {
             &HarnessStatePromptOptions::default(),
         );
         assert!(empty_text.contains("No saved harness entries yet."));
+    }
+
+    fn state_with_review_dates(due_review_after: &str, fresh_review_after: &str) -> HarnessState {
+        let mut state = empty_harness_state();
+        // The due entry sorts first by path, so only the review date can move it last.
+        for (id, path, review_after) in [
+            ("due", "a", due_review_after),
+            ("fresh", "z", fresh_review_after),
+        ] {
+            let mut entry = make_entry(id, id, "note", path);
+            entry
+                .metadata
+                .insert(REVIEW_AFTER_METADATA_KEY.to_string(), review_after.into());
+            state
+                .entries
+                .get_mut(&RefinementKind::Memory)
+                .unwrap()
+                .insert(id.to_string(), entry);
+        }
+        state
+    }
+
+    fn iso_millis(text: &str) -> u64 {
+        crate::cron::parse_iso_millis(text).unwrap()
+    }
+
+    #[test]
+    fn review_due_entries_are_marked_and_sorted_after_fresh_ones() {
+        let state = state_with_review_dates("2026-01-01T00:00:00.000Z", "2027-01-01T00:00:00.000Z");
+        let rendered = format_harness_state_for_prompt(
+            &state,
+            &HarnessStatePromptOptions {
+                review_now_millis: Some(iso_millis("2026-06-01T00:00:00.000Z")),
+                ..Default::default()
+            },
+        );
+        let entry_lines: Vec<&str> = rendered
+            .lines()
+            .filter(|line| line.starts_with("- [global:"))
+            .collect();
+        assert_eq!(
+            entry_lines,
+            [
+                "- [global:fresh] fresh (z, v1): note",
+                "- [global:due] due (a, v1) (review due): note",
+            ]
+        );
+    }
+
+    #[test]
+    fn fingerprint_changes_when_the_review_due_state_changes_not_as_time_passes() {
+        let state = state_with_review_dates("2026-01-01T00:00:00.000Z", "2027-01-01T00:00:00.000Z");
+        let fingerprint_at = |now: &str| {
+            harness_digest_fingerprint(
+                &state,
+                HarnessDigestRenderFlags {
+                    include_ipython_examples: true,
+                    include_shell_examples: false,
+                    include_refine_examples: false,
+                    review_now_millis: Some(iso_millis(now)),
+                },
+            )
+        };
+        let before_due = fingerprint_at("2025-12-01T00:00:00.000Z");
+        let just_due = fingerprint_at("2026-02-01T00:00:00.000Z");
+        let long_after_due = fingerprint_at("2026-09-01T00:00:00.000Z");
+        assert_ne!(before_due, just_due);
+        assert_eq!(just_due, long_after_due);
+    }
+
+    #[test]
+    fn an_undated_entry_is_due_only_when_a_refinement_wrote_it() {
+        let now = iso_millis("2027-01-01T00:00:00.000Z");
+        let undated = |source: &str, updated_at: &str| {
+            let mut entry = make_entry("m1", "Fact", "note", "a");
+            entry.source = source.to_string();
+            entry.updated_at = updated_at.to_string();
+            entry
+        };
+        let aged = "2026-01-01T00:00:00.000Z";
+        let recent = "2026-12-01T00:00:00.000Z";
+        assert!(entry_review_due(&undated("refine", aged), Some(now)));
+        assert!(!entry_review_due(&undated("refine", recent), Some(now)));
+        assert!(!entry_review_due(&undated("agent", aged), Some(now)));
     }
 }

@@ -4,10 +4,11 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AppliedRefinementEdit, HarnessEntry, HarnessRefinementEvent, HarnessScope, HarnessState,
-    RefinementAction, RefinementKind,
+    RefinementAction, RefinementKind, REVIEW_AFTER_METADATA_KEY, REVIEW_AFTER_MILLIS,
 };
+use crate::session::manager::format_iso;
 
-pub const REFINEMENT_SYSTEM_PROMPT: &str = "You are Prime Agent's /refine continual harness subsystem.\n\nYour job is to improve the editable continual harness state from the current trajectory.\nThis is similar in spirit to context compaction, but instead of summarizing the\nconversation you emit precise Create, Update, or Delete edits to reusable state.\nThe continual harness is the persistent, editable set of prompt notes, memories,\nskills, and subagent specs that lets Prime Agent improve reusable behavior\noutside the token history.\nUse \"continual harness\" for that persistent artifact layer; keep \"RLM\" for the\nruntime, Python REPL kernel, and native call interface that executes those artifacts.\n\nContinual harness components:\n- prompt: supplemental prompt notes only. The base system prompt is immutable and MUST NOT be rewritten.\n- memory: durable facts, decisions, failures, preferences, and outcomes.\n- skill: installed Python REPL skill. Skill create/update edits MUST include a `reference` object with `{\"type\":\"python\"}`, a Python import, and a callable or call pattern; they also MUST include an `arguments` object describing accepted inputs, required fields, defaults, and constraints. Use `{}` for `arguments` only when the Python callable truly needs no external inputs. Include the RLM-native call form `await <skill_import>(...)`.\n- subagent: reusable delegation specs, including purpose, instructions, and when to invoke. Include the RLM-native call form: compose a concise task prompt and spawn with `handle = await rlm.spawn(\"sub-task\", name=\"worker\")`; admission returns immediately with `rlm_child_id`, `name`, `session_dir`, and `model`, never the child's answer. Results arrive only through explicit `agent_message` replies or files; children reply with `await agent_message.send(message, receiver_role=\"parent\")`. Use `await rlm.list_subagents()` to recover direct child handles and `await agent_message.send(..., receiver_role=\"child\", receiver_name=handle.name)` for follow-ups. Do not invent wrappers like `run_subagent(...)`.\n- factory: declarative state-machine workflow specs of subagent states. The spec lives in `arguments.machine` (the original DAG sugar in `arguments.dag` compiles to machine form; pass exactly one form). The kernel validator (`rlm.factory`) enforces the full machine semantics at write time: run a stored factory with `await rlm.factory.run('<id>')`, watch with `await rlm.factory.status(run_id)`, stop with `await rlm.factory.stop(run_id)`, and resume an escalate-paused run with `await rlm.factory.resume(run_id)`.\n\nScope and persistence policy:\n- The default editable continual harness store is local to the current Prime Agent session. Use it for session-specific progress, active task state, current-run coordination notes, temporary blockers, and project facts that should not affect other sessions.\n- A caller may explicitly request global refinement. Global edits must be stable cross-session lessons, durable user preferences, reusable skills/subagents, or tool/environment facts that should affect future sessions.\n- Entry ids in the harness overview may carry a display-only `local:` or `global:` prefix. Always use the bare id (no prefix) in edits.\n- All edits in one refinement apply only to the requested scope's store. During a local refinement, global entries are read-only context: never propose update or delete edits for them; create a local entry instead when a session-specific override is genuinely needed.\n- Project/workspace-specific lessons may be persisted globally only when the title, path, or content explicitly names the project/workspace and the lesson is likely to be reused in future sessions for that project. Prefer local edits when the lesson only belongs in the current conversation.\n- Use memory for declarative facts and preferences, skill for repeatable procedures exposed as Python calls, prompt for narrow behavioral policy addendums, and subagent for reusable delegation roles.\n- Create or update the smallest relevant component: repeated delegation roles should become subagent specs, repeated procedures should become skills, durable facts/preferences should become memories, and narrow behavioral policies should become prompt addendums.\n- When an edit is persisted, include metadata such as `{\"scope\":\"local\"}` or `{\"scope\":\"global\"}` when that helps future review understand the intended blast radius.\n\nUse the trajectory, current continual harness state, and prior refinement history. Prefer\nsmall evidence-backed edits. If prior refinements caused issues, rollback or\nreplace the faulty editable entries. Never edit source files directly. Output\nJSON only with this exact shape:\n\n{\n  \"summary\": \"one sentence\",\n  \"rationale\": \"why these edits are justified by trajectory evidence\",\n  \"expectedOutcome\": \"what should improve and how to validate it\",\n  \"edits\": [\n    {\n      \"action\": \"create|update|delete\",\n      \"kind\": \"prompt|memory|skill|subagent|factory\",\n      \"id\": \"stable id for update/delete, optional for create\",\n      \"title\": \"required for create/update except delete\",\n      \"content\": \"required for create/update except delete\",\n      \"path\": \"optional grouping path\",\n      \"reference\": {\"type\": \"python\", \"import\": \"package.module\", \"callable\": \"function_name\", \"call_pattern\": \"await function_name(...)\"},\n      \"arguments\": {\"name\": {\"type\": \"string\", \"required\": true, \"description\": \"accepted input\"}},\n      \"metadata\": {},\n      \"reason\": \"why this edit is useful\"\n    }\n  ]\n}";
+pub const REFINEMENT_SYSTEM_PROMPT: &str = "You are Prime Agent's /refine continual harness subsystem.\n\nYour job is to improve the editable continual harness state from the current trajectory.\nThis is similar in spirit to context compaction, but instead of summarizing the\nconversation you emit precise Create, Update, or Delete edits to reusable state.\nThe continual harness is the persistent, editable set of prompt notes, memories,\nskills, and subagent specs that lets Prime Agent improve reusable behavior\noutside the token history.\nUse \"continual harness\" for that persistent artifact layer; keep \"RLM\" for the\nruntime, Python REPL kernel, and native call interface that executes those artifacts.\n\nContinual harness components:\n- prompt: supplemental prompt notes only. The base system prompt is immutable and MUST NOT be rewritten.\n- memory: durable facts, decisions, failures, preferences, and outcomes.\n- skill: installed Python REPL skill. Skill create/update edits MUST include a `reference` object with `{\"type\":\"python\"}`, a Python import, and a callable or call pattern; they also MUST include an `arguments` object describing accepted inputs, required fields, defaults, and constraints. Use `{}` for `arguments` only when the Python callable truly needs no external inputs. Include the RLM-native call form `await <skill_import>(...)`.\n- subagent: reusable delegation specs, including purpose, instructions, and when to invoke. Include the RLM-native call form: compose a concise task prompt and spawn with `handle = await rlm.spawn(\"sub-task\", name=\"worker\")`; admission returns immediately with `rlm_child_id`, `name`, `session_dir`, and `model`, never the child's answer. Results arrive only through explicit `agent_message` replies or files; children reply with `await agent_message.send(message, receiver_role=\"parent\")`. Use `await rlm.list_subagents()` to recover direct child handles and `await agent_message.send(..., receiver_role=\"child\", receiver_name=handle.name)` for follow-ups. Do not invent wrappers like `run_subagent(...)`.\n- factory: declarative state-machine workflow specs of subagent states. The spec lives in `arguments.machine` (the original DAG sugar in `arguments.dag` compiles to machine form; pass exactly one form). The kernel validator (`rlm.factory`) enforces the full machine semantics at write time: run a stored factory with `await rlm.factory.run('<id>')`, watch with `await rlm.factory.status(run_id)`, stop with `await rlm.factory.stop(run_id)`, and resume an escalate-paused run with `await rlm.factory.resume(run_id)`.\n\nScope and persistence policy:\n- The default editable continual harness store is local to the current Prime Agent session. Use it for session-specific progress, active task state, current-run coordination notes, temporary blockers, and project facts that should not affect other sessions.\n- A caller may explicitly request global refinement. Global edits must be stable cross-session lessons, durable user preferences, reusable skills/subagents, or tool/environment facts that should affect future sessions.\n- Entry ids in the harness overview may carry a display-only `local:` or `global:` prefix. Always use the bare id (no prefix) in edits.\n- All edits in one refinement apply only to the requested scope's store. During a local refinement, global entries are read-only context: never propose update or delete edits for them; create a local entry instead when a session-specific override is genuinely needed.\n- Project/workspace-specific lessons may be persisted globally only when the title, path, or content explicitly names the project/workspace and the lesson is likely to be reused in future sessions for that project. Prefer local edits when the lesson only belongs in the current conversation.\n- Use memory for declarative facts and preferences, skill for repeatable procedures exposed as Python calls, prompt for narrow behavioral policy addendums, and subagent for reusable delegation roles.\n- Create or update the smallest relevant component: repeated delegation roles should become subagent specs, repeated procedures should become skills, durable facts/preferences should become memories, and narrow behavioral policies should become prompt addendums.\n- When an edit is persisted, include metadata such as `{\"scope\":\"local\"}` or `{\"scope\":\"global\"}` when that helps future review understand the intended blast radius.\n- Entries marked `(review due)` in the harness overview were last written by a refinement more than 90 days ago: confirm each one still holds with an update (which renews its review date), revise it, or delete it if it is stale.\n\nUse the trajectory, current continual harness state, and prior refinement history. Prefer\nsmall evidence-backed edits. If prior refinements caused issues, rollback or\nreplace the faulty editable entries. Never edit source files directly. Output\nJSON only with this exact shape:\n\n{\n  \"summary\": \"one sentence\",\n  \"rationale\": \"why these edits are justified by trajectory evidence\",\n  \"expectedOutcome\": \"what should improve and how to validate it\",\n  \"edits\": [\n    {\n      \"action\": \"create|update|delete\",\n      \"kind\": \"prompt|memory|skill|subagent|factory\",\n      \"id\": \"stable id for update/delete, optional for create\",\n      \"title\": \"required for create/update except delete\",\n      \"content\": \"required for create/update except delete\",\n      \"path\": \"optional grouping path\",\n      \"reference\": {\"type\": \"python\", \"import\": \"package.module\", \"callable\": \"function_name\", \"call_pattern\": \"await function_name(...)\"},\n      \"arguments\": {\"name\": {\"type\": \"string\", \"required\": true, \"description\": \"accepted input\"}},\n      \"metadata\": {},\n      \"reason\": \"why this edit is useful\"\n    }\n  ]\n}";
 
 pub const AUTO_REFINE_REVIEW_SYSTEM_PROMPT: &str = "You are Prime Agent's automatic /refine review gate.\n\nDecide whether this checkpoint should run /refine. Auto /refine writes local continual harness state by default, so approve when the trajectory contains evidence useful to this session's future turns.\nReject one-off noise, unsupported hypotheses, and transient tool outputs. Ask for global refinement only for durable cross-session lessons or explicitly project-qualified lessons likely to be reused in future sessions.\n\nReturn JSON only:\n{\n  \"shouldRefine\": true|false,\n  \"rationale\": \"short reason\",\n  \"instructions\": \"optional concise instructions for /refine if shouldRefine is true\"\n}";
 
@@ -415,6 +416,21 @@ pub fn apply_refinement_proposal(
             applied_edits.push(row);
             continue;
         }
+        let updated_at = now_iso();
+        let mut metadata = edit
+            .metadata
+            .clone()
+            .or_else(|| before.as_ref().map(|entry| entry.metadata.clone()))
+            .unwrap_or_default();
+        // A rollback restores recorded state, so it keeps the recorded review date.
+        if options.rollback_of.is_none() {
+            let written_millis = crate::cron::parse_iso_millis(&updated_at)
+                .expect("now_iso emits a parseable RFC 3339 instant");
+            metadata.insert(
+                REVIEW_AFTER_METADATA_KEY.to_string(),
+                serde_json::json!(format_iso((written_millis + REVIEW_AFTER_MILLIS) as i64)),
+            );
+        }
         let after = HarnessEntry {
             id: id.clone(),
             kind,
@@ -448,16 +464,12 @@ pub fn apply_refinement_proposal(
                 .clone()
                 .or_else(|| before.as_ref().map(|entry| entry.arguments.clone()))
                 .unwrap_or_default(),
-            metadata: edit
-                .metadata
-                .clone()
-                .or_else(|| before.as_ref().map(|entry| entry.metadata.clone()))
-                .unwrap_or_default(),
+            metadata,
             source: "refine".to_string(),
             created_at: before
                 .as_ref()
                 .map_or_else(now_iso, |entry| entry.created_at.clone()),
-            updated_at: now_iso(),
+            updated_at,
             version: before.as_ref().map_or(1, |entry| entry.version + 1),
         };
         records.insert(id.clone(), after.clone());
@@ -875,6 +887,89 @@ mod tests {
         assert!(rolled.applied_edits[0].applied);
         // r1 created m1 with no before snapshot, so the rollback deletes it.
         assert!(!state.entries[&RefinementKind::Memory].contains_key("m1"));
+    }
+
+    fn apply_memory_edit(
+        state: &mut HarnessState,
+        id: &str,
+        action: RefinementAction,
+        rollback_of: Option<&str>,
+    ) -> super::super::RefinementResult {
+        let mut edit = create_memory_edit("m1", "Fact", "builds are green");
+        edit.action = Some(action);
+        apply_refinement_proposal(
+            state,
+            &RefinementProposal {
+                edits: vec![edit],
+                ..Default::default()
+            },
+            ApplyOptions {
+                id: id.to_string(),
+                rollback_of: rollback_of.map(str::to_string),
+                scope: Some(HarnessScope::Local),
+                baseline_state: None,
+                factory_enabled: false,
+            },
+        )
+    }
+
+    const LONG_PAST: &str = "2000-01-01T00:00:00.000Z";
+
+    fn set_review_after(state: &mut HarnessState, review_after: &str) {
+        state
+            .entries
+            .get_mut(&RefinementKind::Memory)
+            .unwrap()
+            .get_mut("m1")
+            .unwrap()
+            .metadata
+            .insert(REVIEW_AFTER_METADATA_KEY.to_string(), review_after.into());
+    }
+
+    fn review_after(state: &HarnessState) -> String {
+        state.entries[&RefinementKind::Memory]["m1"].metadata[REVIEW_AFTER_METADATA_KEY]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn refinement_writes_set_review_after_and_updates_refresh_it() {
+        let mut state = empty_harness_state();
+        apply_memory_edit(&mut state, "r1", RefinementAction::Create, None);
+        let created = &state.entries[&RefinementKind::Memory]["m1"];
+        assert_eq!(
+            crate::cron::parse_iso_millis(&review_after(&state)).unwrap(),
+            crate::cron::parse_iso_millis(&created.updated_at).unwrap() + REVIEW_AFTER_MILLIS
+        );
+        set_review_after(&mut state, LONG_PAST);
+        apply_memory_edit(&mut state, "r2", RefinementAction::Update, None);
+        let updated = &state.entries[&RefinementKind::Memory]["m1"];
+        assert_eq!(
+            crate::cron::parse_iso_millis(&review_after(&state)).unwrap(),
+            crate::cron::parse_iso_millis(&updated.updated_at).unwrap() + REVIEW_AFTER_MILLIS
+        );
+    }
+
+    #[test]
+    fn rollback_restores_the_recorded_review_after() {
+        let mut state = empty_harness_state();
+        apply_memory_edit(&mut state, "r1", RefinementAction::Create, None);
+        set_review_after(&mut state, LONG_PAST);
+        let update = apply_memory_edit(&mut state, "r2", RefinementAction::Update, None);
+        assert_ne!(review_after(&state), LONG_PAST);
+        apply_refinement_proposal(
+            &mut state,
+            &rollback_proposal(&update),
+            ApplyOptions {
+                id: "r3".to_string(),
+                rollback_of: Some("r2".to_string()),
+                scope: Some(HarnessScope::Local),
+                baseline_state: None,
+                factory_enabled: false,
+            },
+        );
+        assert_eq!(review_after(&state), LONG_PAST);
     }
 
     #[test]

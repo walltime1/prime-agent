@@ -101,6 +101,12 @@ fn render_digest_with_fingerprint(
         include_ipython_examples: context.include_ipython,
         include_shell_examples: context.include_shell_examples,
         include_refine_examples: context.include_ipython && context.include_refine,
+        review_now_millis: Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+        ),
     };
     let digest = format_harness_state_for_prompt(
         &merged,
@@ -109,6 +115,7 @@ fn render_digest_with_fingerprint(
             include_shell_examples: context.include_shell_examples,
             include_refine_examples: Some(render_flags.include_refine_examples),
             query_terms: Some(query_terms),
+            review_now_millis: render_flags.review_now_millis,
             ..Default::default()
         },
     );
