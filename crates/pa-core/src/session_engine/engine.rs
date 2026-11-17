@@ -659,6 +659,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
             // A spawned child's prompt must read "depth: N (not root)" with
             // the child-agent reply doctrine, never the root identity.
             rlm_depth: config.rlm_depth,
+            workspace: workspace.as_deref(),
             factory_child: config.factory_child,
             daemonless: config.daemonless,
             can_spawn: config.rlm_subagent_host.is_some(),

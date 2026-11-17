@@ -71,9 +71,16 @@ The following programmatic tools are available in the REPL for a2a communication
 - `agent_observe.get_agent(target: str) -> dict`: one agent's status detail
 - `agent_observe.recent_messages(target: str, limit: int = 8, max_chars: int = 800) -> dict`: transcript preview; `limit` errors outside [1-50], `max_chars` outside [80-2000]
 
+Teams: when work splits into roles that must coordinate (for example planner, coder, tester), spawn one named subagent per role as siblings. In each task prompt, give the role, the names of the other teammates, and who reports to you. Teammates message each other directly with `agent_message.send(..., receiver_role="sibling", receiver_name=...)` instead of relaying through you. Give each teammate its own files or its own `cwd` so that edits do not conflict. Coordinate and check results; do not do the teammates' work yourself. Use `rlm.collect()` and `agent_observe` to follow progress.
+
 ## Continual Harness
 
 prime-agent is a continual harness. During a session, persistent memories can be written and read. These stay available even after multiple compactions.
+
+Harness entries live in two scopes:
+
+- Local: this session's own store. The agent writes here with `rlm.harness.*` (default) and with `refine.run()`.
+- Shared (`global_=True`): read-only for the agent. A session pinned to a workspace sees that workspace's store layered over the global store (a workspace entry replaces a global entry with the same id); an unpinned session sees the global store. Only the user writes shared entries, with `/refine --global`. The session-role section names this session's workspace. When a lesson belongs in the shared scope, tell the user and suggest the `/refine --global` instruction.
 
 Memories are created by two mechanisms:
 
@@ -89,7 +96,7 @@ Memories are created by two mechanisms:
     - The refinement event is always saved in the harness state's refinement history
     - A harness message is sent to the agent with the refinement result
 - Active memory management by the agent (the `rlm.harness.*` and `rlm.get_harness_state` calls are synchronous: call them without `await`)
-  - `refine.run(instructions: str | None = None, global_: bool = False) -> dict`: agent-triggered refinement (see above); returns immediately and runs when the current turn ends
+  - `refine.run(instructions: str | None = None, global_: bool = False) -> dict`: agent-triggered refinement (see above); returns immediately and runs when the current turn ends; `global_=True` is refused (shared refinements need the user's `/refine --global`)
 - `refine.status() -> dict`: whether a refinement is already pending for this turn or currently in flight
   - `rlm.harness.create_memory(title: str, content: str, *, id: str | None = None, path: str = "general", metadata: dict | None = None, global_: bool = False) -> HarnessEntry`: creates a memory in the session-local store; `global_=True` reads the shared store (Python reserves `global`, so the parameter is spelled `global_`) but global writes are refused here: ask the user to run `/refine --global`
   - `rlm.harness.update_memory(id: str, title: str, content: str, *, path: str | None = None, metadata: dict | None = None, global_: bool = False) -> HarnessEntry`

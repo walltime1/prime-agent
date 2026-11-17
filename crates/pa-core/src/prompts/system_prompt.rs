@@ -84,6 +84,8 @@ pub struct BuildSystemPromptOptions<'a> {
     pub allow_recursion: Option<bool>,
     /// Fixed recursive-agent depth for this session.
     pub rlm_depth: Option<u32>,
+    /// The harness workspace the session is pinned to; `None` reads the global store alone.
+    pub workspace: Option<&'a str>,
     /// Human-readable parent name or id for child communication doctrine.
     pub rlm_parent_agent: Option<&'a str>,
     /// Whether this child runs one factory state: the factory reads its
@@ -323,6 +325,12 @@ fn session_role_section(options: &BuildSystemPromptOptions, has_ipython: bool) -
                 .to_string(),
         );
     }
+    lines.push(match options.workspace {
+        Some(name) => format!(
+            "Harness workspace: `{name}`. Shared (`global_=True`) entries come from the `{name}` workspace store layered over the global store; the user's `/refine --global` writes to the `{name}` store."
+        ),
+        None => "Harness workspace: none. Shared (`global_=True`) entries come from the global store; the user's `/refine --global` writes there.".to_string(),
+    });
     if options.allow_recursion == Some(false) {
         lines.push("Subagent spawning is disabled in this session.".to_string());
     }
@@ -473,6 +481,28 @@ mod tests {
         assert!(tail.contains("<available_skills>"));
         assert!(tail.contains("Recursive agent depth: 0 (root)"));
         assert!(tail.contains("Pre-installed Python packages: requests, httpx,"));
+    }
+
+    #[test]
+    fn the_session_role_names_the_harness_workspace() {
+        let role_line = |workspace: Option<&str>| {
+            build_system_prompt(&BuildSystemPromptOptions {
+                cwd: "/w".to_string(),
+                workspace,
+                ..Default::default()
+            })
+            .lines()
+            .find(|line| line.starts_with("Harness workspace:"))
+            .map(str::to_string)
+        };
+        assert_eq!(
+            role_line(Some("coding")).as_deref(),
+            Some("Harness workspace: `coding`. Shared (`global_=True`) entries come from the `coding` workspace store layered over the global store; the user's `/refine --global` writes to the `coding` store.")
+        );
+        assert_eq!(
+            role_line(None).as_deref(),
+            Some("Harness workspace: none. Shared (`global_=True`) entries come from the global store; the user's `/refine --global` writes there.")
+        );
     }
 
     #[test]
