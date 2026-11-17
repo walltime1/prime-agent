@@ -163,6 +163,19 @@ fn main_impl(args: &[String], runtime: &dyn mode::Runtime) -> Result<i32, String
         return Ok(0);
     }
 
+    if let Some(workspace) = parsed.workspace.as_deref() {
+        crate::config::require_agent_dir()?;
+        let agent_dir = pa_types::platform::agent_dir()
+            .ok_or_else(|| "Cannot resolve agent directory".to_string())?;
+        let target = if matches!(workspace.trim(), "off" | "clear" | "global" | "none") {
+            None
+        } else {
+            Some(workspace.trim())
+        };
+        pa_types::workspace::write_active_workspace(&agent_dir, target)
+            .map_err(|err| format!("Failed to set workspace: {err}"))?;
+    }
+
     crate::config::require_agent_dir()?;
 
     if parsed.export.is_some() {

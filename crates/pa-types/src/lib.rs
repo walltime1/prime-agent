@@ -18,6 +18,7 @@ pub mod skill_blocks;
 pub mod slash_commands;
 pub mod themes;
 pub mod usage;
+pub mod workspace;
 
 use serde::{Deserialize, Serialize};
 

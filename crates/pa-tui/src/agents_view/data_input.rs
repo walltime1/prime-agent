@@ -76,6 +76,25 @@ impl AgentsViewMode {
             &self.session_activity,
             self.options.anchor_session_id.as_deref(),
         );
+        if self.workspace_filter && !scope_active {
+            let wanted = pa_types::platform::agent_dir()
+                .and_then(|dir| pa_types::workspace::read_active_workspace(&dir))
+                .unwrap_or_else(|| "global".to_string());
+            let matching_parents: std::collections::HashSet<String> = rows
+                .iter()
+                .filter(|row| row.kind == RowKind::Agent && row.workspace == wanted)
+                .map(|row| row.identity.clone())
+                .collect();
+            rows.retain(|row| {
+                if row.kind == RowKind::Agent {
+                    matching_parents.contains(&row.identity)
+                } else {
+                    row.parent_identity
+                        .as_ref()
+                        .is_some_and(|parent| matching_parents.contains(parent))
+                }
+            });
+        }
         // The entry anchor's row may be nested: add its ancestors to the expansion below so this
         // pass reveals it.
         if let (true, Some(anchor)) = (
@@ -539,6 +558,21 @@ impl AgentsViewMode {
             && self.keybindings.matches(key, "tui.select.cancel")
             && self.dismiss_incident_notice()
         {
+            return;
+        }
+        if key == "ctrl+f" || key == "alt+w" {
+            self.workspace_filter = !self.workspace_filter;
+            let active_ws = pa_types::platform::agent_dir()
+                .and_then(|dir| pa_types::workspace::read_active_workspace(&dir));
+            self.rebuild_rows();
+            if self.workspace_filter {
+                match active_ws {
+                    Some(name) => self.set_status(&format!("Filtered to workspace '{name}' (ctrl+f to show all)")),
+                    None => self.set_status("Filtered to global workspace (ctrl+f to show all)"),
+                }
+            } else {
+                self.set_status("Showing all workspaces");
+            }
             return;
         }
         // `app.agents.rename` (default ctrl+r, empty editor only, before the delete arm):

@@ -12,6 +12,10 @@ pub const REFINEMENT_KINDS: [&str; 5] = ["prompt", "memory", "skill", "subagent"
 /// Directory name under the agent dir (or session artifact dir).
 pub const HARNESS_STATE_DIR_NAME: &str = "harness";
 pub const REFINEMENT_HISTORY_FILE_NAME: &str = "refinement_history.jsonl";
+pub use pa_types::workspace::{
+    list_workspaces, read_active_workspace, validate_workspace_name, write_active_workspace,
+    ACTIVE_WORKSPACE_FILE_NAME, WORKSPACES_DIR_NAME,
+};
 
 /// Default overview limits (TS `DEFAULT_OVERVIEW_*` constants).
 pub const DEFAULT_OVERVIEW_ENTRY_LIMIT: usize = 3;
@@ -121,6 +125,52 @@ fn kind_from_name(name: &str) -> RefinementKind {
 #[must_use]
 pub fn get_global_harness_state_dir(agent_dir: &Path) -> PathBuf {
     agent_dir.join(HARNESS_STATE_DIR_NAME)
+}
+
+/// Harness state directory for a named workspace (`<agent_dir>/workspaces/<name>/harness`).
+///
+/// # Errors
+///
+/// Returns an error if `workspace` fails [`validate_workspace_name`].
+pub fn get_workspace_harness_state_dir(agent_dir: &Path, workspace: &str) -> anyhow::Result<PathBuf> {
+    Ok(pa_types::workspace::workspace_harness_state_dir(
+        agent_dir, workspace,
+    )?)
+}
+
+/// Resolve the non-local harness state directory for `workspace` (or global when `None`).
+///
+/// # Errors
+///
+/// Returns an error if `workspace` is `Some` with an invalid name.
+pub fn resolve_harness_state_dir(
+    agent_dir: &Path,
+    workspace: Option<&str>,
+) -> anyhow::Result<PathBuf> {
+    match workspace {
+        Some(name) => get_workspace_harness_state_dir(agent_dir, name),
+        None => Ok(get_global_harness_state_dir(agent_dir)),
+    }
+}
+
+/// Resolve the active non-local harness state directory from `<agent_dir>/active_workspace`
+/// (falling back to global when no workspace is selected).
+#[must_use]
+pub fn get_active_harness_state_dir(agent_dir: &Path) -> PathBuf {
+    match read_active_workspace(agent_dir) {
+        Some(name) => get_workspace_harness_state_dir(agent_dir, &name)
+            .unwrap_or_else(|_| get_global_harness_state_dir(agent_dir)),
+        None => get_global_harness_state_dir(agent_dir),
+    }
+}
+
+/// The workspace whose harness store is `harness_state_dir`, or `None` when it is
+/// not a workspace store (global, local, or foreign paths).
+#[must_use]
+pub fn workspace_for_harness_dir(agent_dir: &Path, harness_state_dir: &Path) -> Option<String> {
+    let name = harness_state_dir.parent()?.file_name()?.to_str()?;
+    let expected = get_workspace_harness_state_dir(agent_dir, name).ok()?;
+    (expected == harness_state_dir).then(|| name.to_string())
 }
 
 #[must_use]
@@ -345,6 +395,9 @@ pub struct RefinementResult {
     pub rollback_of: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<HarnessScope>,
+    /// The workspace whose store a non-local refinement wrote to; `None` is global.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
 }
 
 /// One applied (or failed) edit with before/after snapshots: the TS
@@ -813,6 +866,7 @@ mod tests {
             harness_state_path: get_harness_state_path(&dir).display().to_string(),
             rollback_of: None,
             scope: None,
+            workspace: None,
         };
         append_global_refinement(&dir, &result).unwrap();
         let loaded = load_global_refinement_history(&dir);
@@ -858,6 +912,7 @@ mod tests {
             harness_state_path: String::new(),
             rollback_of: None,
             scope: None,
+            workspace: None,
         };
         let body = format_refinement_notice_body(&result);
         assert!(body.starts_with("created a memory about the flaky test"));
@@ -866,6 +921,25 @@ mod tests {
         assert_eq!(
             infer_refinement_result_scope(&result),
             Some(HarnessScope::Global)
+        );
+    }
+
+    #[test]
+    fn workspace_for_harness_dir_matches_only_workspace_stores() {
+        let tmp = tempfile::tempdir().unwrap();
+        let agent_dir = tmp.path();
+        let workspace_dir = get_workspace_harness_state_dir(agent_dir, "proj-a").unwrap();
+        assert_eq!(
+            workspace_for_harness_dir(agent_dir, &workspace_dir).as_deref(),
+            Some("proj-a")
+        );
+        assert_eq!(
+            workspace_for_harness_dir(agent_dir, &get_global_harness_state_dir(agent_dir)),
+            None
+        );
+        assert_eq!(
+            workspace_for_harness_dir(agent_dir, &tmp.path().join("elsewhere/proj-a/harness")),
+            None
         );
     }
 }

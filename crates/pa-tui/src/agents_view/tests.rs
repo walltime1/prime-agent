@@ -55,6 +55,7 @@ fn mode_with_row(title: &str, model: &str) -> (AgentsViewMode, usize) {
         summary: serde_json::json!({ "sessionName": title }),
         title: title.to_string(),
         model: model.to_string(),
+        workspace: "global".to_string(),
         cost: 0.0,
         age: "1s".to_string(),
         depth: 0,

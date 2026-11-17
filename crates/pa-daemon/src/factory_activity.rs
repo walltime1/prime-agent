@@ -189,7 +189,7 @@ mod tests {
             &["a", "b"],
         );
         crate::test_support::write_factory_specs(
-            &pa_core::refinement::get_global_harness_state_dir(&agent_dir),
+            &pa_core::refinement::get_active_harness_state_dir(&agent_dir),
             &["shared"],
         );
         let graph = worker

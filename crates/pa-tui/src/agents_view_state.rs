@@ -584,6 +584,7 @@ pub struct RowLayout {
     pub legend: String,
     pub name_width: usize,
     pub model_width: usize,
+    pub workspace_width: usize,
     pub details: HashMap<String, String>,
 }
 
@@ -652,7 +653,24 @@ pub fn build_layout(rows: &[crate::agents_view_forest::AgentsViewRow], width: us
         .unwrap_or(0)
         .max(3);
     let details_width = cost_width + 2 + age_width;
-    let available = width.saturating_sub(details_width + 4);
+    let desired_workspace = rows
+        .iter()
+        .map(|row| str_width(&row.workspace))
+        .max()
+        .unwrap_or(0)
+        .max(9)
+        .min(16);
+    let workspace_width = if width >= details_width + desired_workspace + 24 {
+        desired_workspace
+    } else {
+        0
+    };
+    let workspace_gap = if workspace_width > 0 {
+        workspace_width + 2
+    } else {
+        0
+    };
+    let available = width.saturating_sub(details_width + workspace_gap + 4);
     let desired_model = rows
         .iter()
         .map(|row| str_width(&row.model))
@@ -676,6 +694,9 @@ pub fn build_layout(rows: &[crate::agents_view_forest::AgentsViewRow], width: us
         table_cell("Session", name_width),
         table_cell("Model", model_width),
     ];
+    if workspace_width > 0 {
+        headings.push(table_cell("Workspace", workspace_width));
+    }
     headings.push(detail_line("Cost", "Age"));
     let details = rows
         .iter()
@@ -685,6 +706,7 @@ pub fn build_layout(rows: &[crate::agents_view_forest::AgentsViewRow], width: us
         legend: table_cell(&headings.join("  "), width),
         name_width,
         model_width,
+        workspace_width,
         details,
     }
 }

@@ -1520,7 +1520,7 @@ pub(crate) async fn run_prompts_and_emit(
     root_node: &std::sync::Arc<crate::print_rlm::InlineSessionNode>,
 ) -> Result<i32, String> {
     let global_harness_dir =
-        pa_core::refinement::get_global_harness_state_dir(&options.config.agent_dir);
+        pa_core::refinement::get_active_harness_state_dir(&options.config.agent_dir);
     let mut boundary = crate::print_boundary::TurnBoundary::new(options.app_mode == AppMode::Json);
     let exit = run_prompts(
         engine,

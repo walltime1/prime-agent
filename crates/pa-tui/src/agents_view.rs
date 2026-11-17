@@ -366,6 +366,7 @@ struct AgentsViewMode {
     rows: Vec<AgentsViewRow>,
     selected: usize,
     query: String,
+    workspace_filter: bool,
     /// The status line: rendered at the bottom hint row in its tone, expired by the
     /// loop's deadline arm, sticky lines cleared by the next key.
     status: Option<Status>,
@@ -556,6 +557,7 @@ impl AgentsViewMode {
             scope_root: None,
             scope_active: false,
             scope_dropped: false,
+            workspace_filter: false,
             expanded_parents: std::collections::HashSet::default(),
             program_shown_parents: std::collections::HashSet::default(),
             pending_ancestors,

@@ -393,6 +393,10 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
                 .as_deref()
                 .and_then(super::harness_digest::session_artifact_dir_for_log)
         });
+    if let Some(dir) = session_artifact_dir.as_deref() {
+        let active_ws = pa_types::workspace::read_active_workspace(&config.agent_dir);
+        let _ = pa_types::workspace::write_session_workspace(dir, active_ws.as_deref());
+    }
     let local_harness_dir =
         crate::refinement::get_local_harness_state_dir(session_artifact_dir.as_deref());
     // The only sessions whose `refine.*` host requests register and the
@@ -620,7 +624,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
     // from the session artifacts (or the daemon-owned conversation log), and
     // the interfaces the digest may reference.
     let digest_context = super::harness_digest::HarnessDigestContext {
-        global_dir: crate::refinement::get_global_harness_state_dir(&config.agent_dir),
+        global_dir: crate::refinement::get_active_harness_state_dir(&config.agent_dir),
         local_dir: local_harness_dir,
         include_ipython: active_tool_names
             .iter()
@@ -941,7 +945,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
     let factory_host =
         super::factory_host::FactoryHost::new(super::factory_host::FactoryHostConfig {
             agent_dir: config.agent_dir.clone(),
-            global_harness_dir: crate::refinement::get_global_harness_state_dir(&config.agent_dir),
+            global_harness_dir: crate::refinement::get_active_harness_state_dir(&config.agent_dir),
             local_harness_dir: factory_local_harness_dir,
             session_model: factory_session_model,
             allowed_models: factory_allowed_models,

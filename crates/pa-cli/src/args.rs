@@ -169,6 +169,7 @@ pub struct Args {
     pub autonomous_timeout_ms: Option<u64>,
     pub goal: Option<String>,
     pub goal_token_budget: Option<u32>,
+    pub workspace: Option<String>,
     /// The `--list-models` flag's tri-state (None = absent,
     /// Some(None) = the bare flag, Some(Some(x)) = with a value).
     #[allow(clippy::option_option)] // the CLI flag's tri-state is genuinely a double Option
@@ -420,6 +421,18 @@ pub fn parse_args(args: &[String]) -> Args {
             "--goal-token-budget" => {
                 let value = require_value!(arg);
                 result.goal_token_budget = parse_positive_u32(&value, arg, &mut result.diagnostics);
+            }
+            "--workspace" => {
+                let value = require_value!(arg);
+                if pa_types::workspace::validate_workspace_name(&value).is_err()
+                    && !matches!(value.trim(), "off" | "clear" | "global" | "none")
+                {
+                    result
+                        .diagnostics
+                        .push(Diagnostic::error(format!("invalid --workspace name: {value:?}")));
+                } else {
+                    result.workspace = Some(value);
+                }
             }
             "--list-models" => {
                 let has_search = args

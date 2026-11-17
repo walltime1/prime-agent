@@ -497,6 +497,7 @@ pub fn apply_refinement_proposal(
         harness_state_path: String::new(),
         rollback_of: options.rollback_of,
         scope: options.scope,
+        workspace: None,
     }
 }
 

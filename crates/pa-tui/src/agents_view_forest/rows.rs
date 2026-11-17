@@ -21,6 +21,7 @@ struct BaseRow {
     summary: Value,
     title: String,
     model: String,
+    workspace: String,
     age: String,
     own_cost: f64,
     recursive_cost: f64,
@@ -127,6 +128,23 @@ pub(crate) fn build_rows<S: std::hash::BuildHasher + Default>(
             },
             ..live
         };
+        let workspace = summary
+            .get("workspace")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|ws| !ws.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                summary
+                    .get("sessionFile")
+                    .and_then(Value::as_str)
+                    .and_then(|path| {
+                        pa_types::workspace::read_session_workspace_for_log(
+                            std::path::Path::new(path),
+                        )
+                    })
+            })
+            .unwrap_or_else(|| "global".to_string());
         base.push(BaseRow {
             kind,
             section: record.section,
@@ -134,6 +152,7 @@ pub(crate) fn build_rows<S: std::hash::BuildHasher + Default>(
             identity: record.identity.clone(),
             title: session_title(&summary),
             model,
+            workspace,
             age,
             own_cost: summary
                 .get("usage")
@@ -361,6 +380,7 @@ fn agents_row(row: &BaseRow, depth: usize, parent_identity: Option<&str>) -> Age
         summary: row.summary.clone(),
         title: row.title.clone(),
         model: row.model.clone(),
+        workspace: row.workspace.clone(),
         cost: row.recursive_cost,
         age: row.age.clone(),
         depth,
@@ -391,6 +411,7 @@ fn merged_summary_row(parent: &BaseRow, depth: usize, expanded: bool) -> AgentsV
             if total == 1 { "" } else { "s" }
         ),
         model: String::new(),
+        workspace: String::new(),
         cost: parent.descendant_cost,
         age: String::new(),
         depth,
@@ -413,6 +434,7 @@ fn activity_rows(parent: &BaseRow, depth: usize) -> Vec<AgentsViewRow> {
         summary: parent.summary.clone(),
         title,
         model: String::new(),
+        workspace: String::new(),
         cost: 0.0,
         age: String::new(),
         depth,
@@ -475,6 +497,7 @@ fn spawn_code_rows(
         summary: parent.summary.clone(),
         title: title.to_string(),
         model: String::new(),
+        workspace: String::new(),
         cost: 0.0,
         age: String::new(),
         depth,

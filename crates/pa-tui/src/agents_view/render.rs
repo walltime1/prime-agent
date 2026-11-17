@@ -43,6 +43,32 @@ impl AgentsViewMode {
         )];
         if let Some(root) = &self.scope_root {
             extra_metadata.push(("depth".to_string(), root.child_depth.to_string()));
+        } else if let Some(agent_dir) = pa_types::platform::agent_dir() {
+            let active = pa_types::workspace::read_active_workspace(&agent_dir);
+            let workspaces = pa_types::workspace::list_workspaces(&agent_dir);
+            let summary = if workspaces.is_empty() {
+                active
+                    .as_deref()
+                    .map_or_else(|| "none (global)".to_string(), |name| format!("{name} (active)"))
+            } else {
+                workspaces
+                    .into_iter()
+                    .map(|name| {
+                        if active.as_deref() == Some(name.as_str()) {
+                            format!("{name} (active)")
+                        } else {
+                            name
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let filter_suffix = if self.workspace_filter {
+                " · filtered (ctrl+f)"
+            } else {
+                ""
+            };
+            extra_metadata.push(("workspaces".to_string(), format!("{summary}{filter_suffix}")));
         }
         let theme = &self.theme;
         let chrome = crate::chrome::ChromeState {
@@ -544,7 +570,12 @@ impl AgentsViewMode {
                 .identity
                 .starts_with(crate::agents_view_forest::SUMMARY_ROW_PREFIX)
             {
-                let zone = layout.name_width + 2 + layout.model_width;
+                let workspace_gap = if layout.workspace_width > 0 {
+                    layout.workspace_width + 2
+                } else {
+                    0
+                };
+                let zone = layout.name_width + 2 + layout.model_width + workspace_gap;
                 let title = crate::agents_view_state::truncate_text(&text, zone);
                 let pad = zone.saturating_sub(str_width(&title));
                 let line: Line = vec![
@@ -664,6 +695,16 @@ impl AgentsViewMode {
             "  ".to_string(),
             ratatui::style::Style::default(),
         ));
+        if layout.workspace_width > 0 {
+            line.push(theme.fg(
+                ThemeColor::Dim,
+                cell(&row.workspace, layout.workspace_width),
+            ));
+            line.push(crate::Span::styled(
+                "  ".to_string(),
+                ratatui::style::Style::default(),
+            ));
+        }
         let details = layout
             .details
             .get(&row.identity)

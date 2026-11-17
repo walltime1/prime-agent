@@ -825,6 +825,60 @@ impl SessionUi {
                 }
                 self.handle_reload_command(view)?;
             }
+            "workspace" => {
+                let Some(agent_dir) = pa_types::platform::agent_dir() else {
+                    self.error_row("Cannot resolve agent directory.", view);
+                    return Ok(());
+                };
+                let arg = resolved.args.trim();
+                if arg.is_empty() || arg == "list" {
+                    let active = pa_types::workspace::read_active_workspace(&agent_dir);
+                    let workspaces = pa_types::workspace::list_workspaces(&agent_dir);
+                    let active_line = active.as_deref().unwrap_or("none (global)");
+                    let list_line = if workspaces.is_empty() {
+                        "none".to_string()
+                    } else {
+                        workspaces.join(", ")
+                    };
+                    self.note(
+                        &format!(
+                            "Active workspace: {active_line}\nAvailable workspaces: {list_line}\nUsage: /workspace <name> | /workspace off"
+                        ),
+                        view,
+                    );
+                    return Ok(());
+                }
+                if self.turn_active || view.working.is_some() || self.work_in_flight() {
+                    self.note_as(
+                        "Wait for the current response to finish before switching workspaces.",
+                        StatusKind::Warning,
+                        view,
+                    );
+                    return Ok(());
+                }
+                if view.compaction.is_some() {
+                    self.note_as(
+                        "Wait for compaction to finish before switching workspaces.",
+                        StatusKind::Warning,
+                        view,
+                    );
+                    return Ok(());
+                }
+                let target = if matches!(arg, "off" | "clear" | "global" | "none") {
+                    None
+                } else {
+                    Some(arg)
+                };
+                if let Err(err) = pa_types::workspace::write_active_workspace(&agent_dir, target) {
+                    self.error_row(&format!("Workspace switch failed: {err}"), view);
+                    return Ok(());
+                }
+                match target {
+                    Some(name) => self.note(&format!("Selected workspace: {name}"), view),
+                    None => self.note("Cleared workspace (using global state).", view),
+                }
+                self.handle_reload_command(view)?;
+            }
             "heartbeats" => {
                 if !resolved.args.is_empty() {
                     view.editor

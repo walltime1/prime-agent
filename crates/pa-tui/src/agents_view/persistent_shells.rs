@@ -145,6 +145,7 @@ impl AgentsViewMode {
                         .map(single_line)
                         .unwrap_or_default(),
                     model: "-".to_string(),
+                    workspace: String::new(),
                     cost: 0.0,
                     age: format_duration(shell.get("durationMs").and_then(Value::as_u64)),
                     depth: 0,

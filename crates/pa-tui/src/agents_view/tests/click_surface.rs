@@ -9,8 +9,9 @@ use super::*;
 fn expected_row(title_cell: &str, layout: &RowLayout) -> String {
     let bullet = "\u{2022}";
     format!(
-        "{bullet} {title_cell}  {}  $0.00   1s",
+        "{bullet} {title_cell}  {}  {}  $0.00   1s",
         cell("mock-1", layout.model_width),
+        cell("global", layout.workspace_width),
     )
 }
 
@@ -269,7 +270,7 @@ fn the_model_column_fits_the_widest_model_name_and_gives_way_first() {
     for width in [140, 80, 60] {
         let layout = build_layout(&mode.rows, width);
         let text = flat(&mode.render_row(&mode.rows[index], &layout, width, false));
-        let available = width - 4 - str_width(&layout.details[&title]);
+        let available = width - 6 - layout.workspace_width - str_width(&layout.details[&title]);
         if width == 140 {
             assert!(text.contains(model), "{text:?}");
             assert_eq!(layout.name_width, 28);

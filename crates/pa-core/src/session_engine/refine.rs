@@ -127,12 +127,23 @@ pub fn create_refinement_outcome_message(result: &RefinementResult) -> CustomMes
         "scope": result.scope.unwrap_or(HarnessScope::Local),
         "edits": result.applied_edits,
     });
+    let workspace_label = result
+        .workspace
+        .as_deref()
+        .map(|workspace| format!(" (workspace '{workspace}')"))
+        .unwrap_or_default();
+    if let (Some(workspace), Some(map)) = (result.workspace.clone(), details.as_object_mut()) {
+        map.insert("workspace".to_string(), json!(workspace));
+    }
     if let (Some(rollback), Some(map)) = (result.rollback_of.clone(), details.as_object_mut()) {
         map.insert("rollbackOf".to_string(), json!(rollback));
     }
     CustomMessage {
         custom_type: REFINEMENT_OUTCOME_CUSTOM_TYPE.to_string(),
-        content: UserContent::Text(format!("Refinement complete: {}", result.summary)),
+        content: UserContent::Text(format!(
+            "Refinement complete: {}{workspace_label}",
+            result.summary
+        )),
         display: true,
         details: Some(details),
         timestamp: now_millis(),
@@ -634,6 +645,11 @@ pub(crate) async fn commit_refinement(
     .await
     .map_err(|error| anyhow::anyhow!("refinement harness update task failed: {error}"))??;
     result.harness_state_path = state_path.to_string_lossy().to_string();
+    if target_scope == HarnessScope::Global {
+        result.workspace = agent_dir.and_then(|agent_dir| {
+            crate::refinement::workspace_for_harness_dir(agent_dir, &global_harness_dir)
+        });
+    }
     let history_write = if target_scope == HarnessScope::Global {
         append_global_refinement(&global_harness_dir, &result).err()
     } else {
@@ -1196,6 +1212,7 @@ mod tests {
             harness_state_path: String::new(),
             rollback_of: None,
             scope: Some(HarnessScope::Local),
+            workspace: None,
         };
         let outcome = create_refinement_outcome_message(&result);
         assert_eq!(outcome.custom_type, "refinement_outcome");
@@ -1705,5 +1722,102 @@ Reviewer instructions: record it"
         assert!(
             !global_state.entries[&crate::refinement::RefinementKind::Memory].contains_key("g1")
         );
+    }
+
+    async fn run_global_refine(dir: &TempDir, agent_dir: &Path, entry_id: &str) -> RefinementResult {
+        let session = tokio::sync::Mutex::new(persisted_session(dir));
+        let agent = Arc::new(Agent::new(AgentOptions::default()));
+        let global_dir = crate::refinement::get_active_harness_state_dir(agent_dir);
+        let reply = format!(
+            r#"{{"summary":"lesson","edits":[{{"action":"create","kind":"memory","id":"{entry_id}","title":"Lesson","content":"durable"}}]}}"#
+        );
+        execute_refinement(
+            &session,
+            &agent,
+            RefinementTranscript {
+                messages: &[user_message("x")],
+                refinement_history: &[],
+            },
+            &global_dir,
+            &test_model(),
+            &RefineOptions {
+                global: true,
+                ..Default::default()
+            },
+            RefinementSource::User,
+            seam(&reply),
+            Some(agent_dir),
+        )
+        .await
+        .unwrap()
+    }
+
+    fn has_memory(harness_dir: &Path, id: &str) -> bool {
+        load_harness_state(harness_dir, HarnessScope::Global).entries
+            [&crate::refinement::RefinementKind::Memory]
+            .contains_key(id)
+    }
+
+    #[tokio::test]
+    async fn global_refine_without_workspace_writes_global_store() {
+        let dir = TempDir::new().unwrap();
+        let agent_dir = dir.path().join("agent");
+        let result = run_global_refine(&dir, &agent_dir, "g1").await;
+        assert_eq!(result.workspace, None);
+        assert!(has_memory(
+            &crate::refinement::get_global_harness_state_dir(&agent_dir),
+            "g1"
+        ));
+        assert!(!agent_dir.join("workspaces").exists());
+        let outcome = create_refinement_outcome_message(&result);
+        assert_eq!(
+            outcome.content,
+            UserContent::Text("Refinement complete: lesson".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn global_refine_with_workspace_writes_only_workspace_store() {
+        let dir = TempDir::new().unwrap();
+        let agent_dir = dir.path().join("agent");
+        crate::refinement::write_active_workspace(&agent_dir, Some("proj-a")).unwrap();
+        let result = run_global_refine(&dir, &agent_dir, "w1").await;
+        assert_eq!(result.workspace.as_deref(), Some("proj-a"));
+        let workspace_dir =
+            crate::refinement::get_workspace_harness_state_dir(&agent_dir, "proj-a").unwrap();
+        assert!(has_memory(&workspace_dir, "w1"));
+        assert!(load_global_refinement_history(&workspace_dir).len() == 1);
+        let global_dir = crate::refinement::get_global_harness_state_dir(&agent_dir);
+        assert!(!crate::refinement::get_harness_state_path(&global_dir).exists());
+        let outcome = create_refinement_outcome_message(&result);
+        assert_eq!(
+            outcome.content,
+            UserContent::Text("Refinement complete: lesson (workspace 'proj-a')".to_string())
+        );
+        assert_eq!(outcome.details.unwrap()["workspace"], "proj-a");
+    }
+
+    #[tokio::test]
+    async fn switching_workspace_changes_loaded_harness() {
+        let dir = TempDir::new().unwrap();
+        let agent_dir = dir.path().join("agent");
+        crate::refinement::write_active_workspace(&agent_dir, Some("alpha")).unwrap();
+        run_global_refine(&dir, &agent_dir, "a1").await;
+        crate::refinement::write_active_workspace(&agent_dir, Some("beta")).unwrap();
+        run_global_refine(&dir, &agent_dir, "b1").await;
+
+        let active = crate::refinement::get_active_harness_state_dir(&agent_dir);
+        assert!(has_memory(&active, "b1"));
+        assert!(!has_memory(&active, "a1"));
+
+        crate::refinement::write_active_workspace(&agent_dir, Some("alpha")).unwrap();
+        let active = crate::refinement::get_active_harness_state_dir(&agent_dir);
+        assert!(has_memory(&active, "a1"));
+        assert!(!has_memory(&active, "b1"));
+
+        crate::refinement::write_active_workspace(&agent_dir, None).unwrap();
+        let active = crate::refinement::get_active_harness_state_dir(&agent_dir);
+        assert!(!has_memory(&active, "a1"));
+        assert!(!has_memory(&active, "b1"));
     }
 }

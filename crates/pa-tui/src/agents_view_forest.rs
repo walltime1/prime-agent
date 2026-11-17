@@ -42,6 +42,7 @@ pub struct AgentsViewRow {
     pub summary: Value,
     pub title: String,
     pub model: String,
+    pub workspace: String,
     pub cost: f64,
     pub age: String,
     /// Nesting depth: 0 for top-level agent rows.
