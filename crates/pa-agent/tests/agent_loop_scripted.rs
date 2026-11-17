@@ -10,12 +10,12 @@ use std::time::Duration;
 use pa_agent::abort::AbortSignal;
 use pa_agent::agent::{Agent, AgentOptions};
 use pa_agent::agent_loop::{run_agent_loop_continue, AgentEventSink, AgentLoopConfig};
-use pa_agent::scripted::ScriptedProvider;
+use pa_agent::scripted::{ScriptStep, ScriptedProvider, ScriptedTurn};
 use pa_agent::stream::AssistantMessageEvent;
 use pa_agent::types::{
     AgentContext, AgentEvent, AgentMessage, AgentTool, AgentToolResult, AgentToolUpdateCallback,
-    AssistantContent, AssistantMessage, Message, Model, StopReason, TextContent, ToolExecutionMode,
-    ToolResultContent, ToolResultMessage, UserContent,
+    AssistantContent, AssistantMessage, Message, Model, StopReason, TextContent, ThinkingContent,
+    ToolExecutionMode, ToolResultContent, ToolResultMessage, Usage, UserContent, UserMessage,
 };
 
 fn test_model() -> Model {
@@ -462,6 +462,68 @@ async fn tool_error_produces_error_tool_result_and_loop_continues() {
         &state.messages[3],
         AgentMessage::Standard(Message::Assistant(_))
     ));
+}
+
+#[tokio::test]
+async fn reasoning_only_stop_after_a_tool_result_is_nudged_to_continue() {
+    let echo = EchoTool::new("echo");
+    let (agent, provider, _events) = scripted_agent(vec![echo.clone()]).await;
+    provider.push_tool_call_turn(
+        None,
+        vec![("call-1", "echo", serde_json::json!({ "text": "a" }))],
+    );
+    let reasoning_only = AssistantMessage {
+        content: vec![AssistantContent::Thinking(ThinkingContent {
+            thinking: "Writing files.".into(),
+            thinking_signature: None,
+            redacted: None,
+        })],
+        api: "test".into(),
+        provider: "test".into(),
+        model: "test-model".into(),
+        response_model: None,
+        response_id: None,
+        diagnostics: None,
+        usage: Usage::zero(),
+        stop_reason: StopReason::Stop,
+        stop_reason_raw: None,
+        error_message: None,
+        timestamp: 0,
+    };
+    provider.push_turn(ScriptedTurn::Events(vec![
+        ScriptStep::Event(Box::new(AssistantMessageEvent::Start {
+            partial: AssistantMessage {
+                content: Vec::new(),
+                ..reasoning_only.clone()
+            },
+        })),
+        ScriptStep::Event(Box::new(AssistantMessageEvent::Done {
+            reason: StopReason::Stop,
+            message: reasoning_only,
+        })),
+    ]));
+    provider.push_tool_call_turn(
+        None,
+        vec![("call-2", "echo", serde_json::json!({ "text": "b" }))],
+    );
+    provider.push_text_turn("done");
+
+    agent.prompt("use the tool").await.unwrap();
+    agent.wait_for_idle().await;
+
+    assert_eq!(echo.calls.load(Ordering::SeqCst), 2);
+    let state = agent.state().await;
+    assert_eq!(
+        state.messages[4],
+        AgentMessage::Standard(Message::User(UserMessage {
+            content: UserContent::Text("Continue: make the tool call you planned.".into()),
+            timestamp: match &state.messages[4] {
+                AgentMessage::Standard(Message::User(user)) => user.timestamp,
+                other => panic!("expected the nudge, got {other:?}"),
+            },
+        }))
+    );
+    assert_eq!(state.messages.len(), 8);
 }
 
 #[tokio::test]

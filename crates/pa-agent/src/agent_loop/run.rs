@@ -5,8 +5,8 @@
 use crate::abort::AbortSignal;
 use crate::stream::StreamFn;
 use crate::types::{
-    AgentContext, AgentEvent, AgentMessage, ShouldStopAfterTurnContext, StopReason, ToolCall,
-    ToolResultMessage,
+    AgentContext, AgentEvent, AgentMessage, AssistantContent, Message, ShouldStopAfterTurnContext,
+    StopReason, ToolCall, ToolResultMessage, UserContent, UserMessage,
 };
 
 use super::abort::{
@@ -15,6 +15,11 @@ use super::abort::{
 use super::response::stream_assistant_response;
 use super::tools::execute_tool_calls;
 use super::{AgentEventSink, AgentLoopConfig};
+
+/// Sent once when a mid-task turn ends with only reasoning: some models (seen
+/// on Qwen3.8 under exact sampling) announce an action in the thinking block
+/// and then stop, and resending the identical prompt reproduces the stall.
+const REASONING_ONLY_STALL_NUDGE: &str = "Continue: make the tool call you planned.";
 
 // Direct port of the TS turn loop.
 #[allow(clippy::too_many_lines)]
@@ -28,6 +33,7 @@ pub(crate) async fn run_loop(
 ) -> anyhow::Result<()> {
     let mut first_turn = true;
     let mut last_turn: Option<ShouldStopAfterTurnContext> = None;
+    let mut stall_nudged = false;
     let mut pending_messages =
         poll_messages_unless_aborted(config.get_steering_messages.as_ref(), signal).await?;
 
@@ -69,6 +75,10 @@ pub(crate) async fn run_loop(
                 }
             }
 
+            let follows_tool_result = matches!(
+                current_context.messages.last(),
+                Some(AgentMessage::Standard(Message::ToolResult(_)))
+            );
             let message =
                 stream_assistant_response(current_context, config, signal, emit, stream_fn).await?;
             new_messages.push(AgentMessage::from(message.clone()));
@@ -94,6 +104,20 @@ pub(crate) async fn run_loop(
                 .into_iter()
                 .cloned()
                 .collect::<Vec<ToolCall>>();
+
+            // No visible text means the model neither answered nor asked the
+            // user anything; the turn only ends a run because it lacks a tool call.
+            let reasoning_only_stall = follows_tool_result
+                && message.stop_reason == StopReason::Stop
+                && tool_calls.is_empty()
+                && !message.content.iter().any(|content| match content {
+                    AssistantContent::Text(text) => !text.text.trim().is_empty(),
+                    AssistantContent::Thinking(_) | AssistantContent::ToolCall(_) => false,
+                })
+                && message.content.iter().any(|content| match content {
+                    AssistantContent::Thinking(thinking) => !thinking.thinking.trim().is_empty(),
+                    AssistantContent::Text(_) | AssistantContent::ToolCall(_) => false,
+                });
 
             let mut tool_results: Vec<ToolResultMessage> = Vec::new();
             has_more_tool_calls = false;
@@ -180,6 +204,15 @@ pub(crate) async fn run_loop(
                 }
                 PostTurnResult::Completed(messages) => {
                     pending_messages = messages;
+                    if !reasoning_only_stall {
+                        stall_nudged = false;
+                    } else if pending_messages.is_empty() && !stall_nudged {
+                        stall_nudged = true;
+                        pending_messages.push(AgentMessage::from(UserMessage {
+                            content: UserContent::Text(REASONING_ONLY_STALL_NUDGE.to_string()),
+                            timestamp: crate::now_ms(),
+                        }));
+                    }
                     // Steering drained by this poll owns the turn boundary;
                     // stop only when it was empty.
                     if pending_messages.is_empty() && should_stop_before_turn!() {

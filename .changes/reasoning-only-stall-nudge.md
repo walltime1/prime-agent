@@ -1,0 +1,1 @@
+- Fixed agents going silent mid-task when the model ended a turn with only reasoning and no tool call; the agent now nudges the model once to continue.
