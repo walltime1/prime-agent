@@ -50,6 +50,7 @@ impl FileSink {
         &self.path
     }
 
+    #[allow(dead_code)] // Dead while FileSink::send_batch is a no-op; kept for upstream rebases.
     async fn write_batch(&self, install_id: &str, events: Vec<TelemetryEvent>) -> Result<()> {
         if events.is_empty() {
             return Ok(());
@@ -65,6 +66,7 @@ impl FileSink {
         self.append(&payload).await
     }
 
+    #[allow(dead_code)] // Dead while FileSink::send_batch is a no-op; kept for upstream rebases.
     async fn rotate_if_needed(&self) -> Result<()> {
         let size = match tokio::fs::metadata(&self.path).await {
             Ok(meta) => meta.len(),
@@ -82,6 +84,7 @@ impl FileSink {
         Ok(())
     }
 
+    #[allow(dead_code)] // Dead while FileSink::send_batch is a no-op; kept for upstream rebases.
     async fn append(&self, payload: &str) -> Result<()> {
         use tokio::io::AsyncWriteExt;
         let mut options = tokio::fs::OpenOptions::new();
@@ -98,6 +101,7 @@ impl FileSink {
     /// 0600 on unix; on other platforms the agent dir ACLs apply. The
     /// signature stays async for the shared call site; the non-unix arm
     /// is legitimately await-free (the ACLs carry the restriction).
+    #[allow(dead_code)] // Dead while FileSink::send_batch is a no-op; kept for upstream rebases.
     #[cfg_attr(
         not(unix),
         allow(clippy::unused_async, clippy::unused_async_trait_impl)
@@ -144,6 +148,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn writes_jsonl_lines() {
         let dir = tempfile::tempdir().unwrap();
         let sink = FileSink::new(dir.path());
@@ -174,6 +179,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn rotates_at_cap() {
         let dir = tempfile::tempdir().unwrap();
         let mut sink = FileSink::at(dir.path().join(FILE_NAME));
@@ -195,6 +201,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn mirror_is_private() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();

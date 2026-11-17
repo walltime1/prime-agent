@@ -51,10 +51,17 @@ impl TelemetrySwitch {
     }
 }
 
-/// Resolve the switch from the environment and `settings`.
+/// Resolve the switch from the environment and `settings`. Telemetry is
+/// stubbed off in this build: an environment opt-out still reports as one (it
+/// rides the daemon create wire), and anything that would enable it reads as off.
 #[must_use]
 pub fn telemetry_switch(_settings: &SettingsManager) -> TelemetrySwitch {
-    TelemetrySwitch::Settings(false)
+    match switch_from(|var| std::env::var(var).ok(), Some(false)) {
+        switch @ TelemetrySwitch::Env { enabled: false, .. } => switch,
+        TelemetrySwitch::Env { enabled: true, .. }
+        | TelemetrySwitch::Settings(_)
+        | TelemetrySwitch::Default => TelemetrySwitch::Settings(false),
+    }
 }
 
 /// The environment variables that decide the switch (see [`TelemetrySwitch`]).

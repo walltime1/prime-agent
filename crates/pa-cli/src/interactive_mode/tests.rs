@@ -357,6 +357,7 @@ fn settings_sink_completes_a_provisioned_home_without_touching_the_choice() {
 /// a completed flow never reports a second, aborted outcome. Telemetry is
 /// on for this test (the repo's `cargo test` env opts out).
 #[test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 fn settings_sink_reports_an_aborted_flow_once() {
     crate::mode::tests::with_clean_telemetry_env(|| {
         tokio::runtime::Runtime::new()
@@ -947,6 +948,7 @@ impl pa_telemetry::TelemetrySink for GatedSink {
 /// analytics POST's network round-trip: the flush hand-off must
 /// complete while delivery still hangs, and the released drain must
 /// still deliver the tracked events.
+#[ignore = "telemetry delivery is stubbed out in this fork: spawn() returns inert(), so no delivery worker exists to block first paint; re-enable when delivery returns (AGENTS.md critical-path guard)"]
 #[test]
 fn the_startup_flush_never_blocks_the_first_frame() {
     tokio::runtime::Runtime::new()

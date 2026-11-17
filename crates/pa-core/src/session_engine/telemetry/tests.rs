@@ -222,6 +222,7 @@ async fn event_properties(
 /// TS "emits aggregate metrics without message or tool content": one run
 /// through the full event sequence, exact counters, and no content leak.
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn emits_aggregate_metrics_without_content() {
     let fixture = fixture();
     let assistant = assistant_message();
@@ -306,6 +307,7 @@ async fn emits_aggregate_metrics_without_content() {
 }
 
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn post_run_compaction_counts_into_the_open_run() {
     let fixture = fixture();
     let assistant = assistant_message();
@@ -379,6 +381,7 @@ async fn compaction_between_runs_is_not_counted() {
 }
 
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn error_and_aborted_outcomes() {
     let fixture = fixture();
     let failed = assistant_with_error("API Error: 429 rate limit exceeded");
@@ -456,6 +459,7 @@ fn provider_and_model_categories() {
 /// Tool calls fold into the run: built-in tools by name, MCP and custom
 /// tools only as aggregates, and no raw tool name rides any event.
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn tool_calls_fold_into_run_aggregates() {
     let fixture = fixture();
     let assistant = assistant_message();
@@ -513,6 +517,7 @@ async fn tool_calls_fold_into_run_aggregates() {
 /// Skills, RLM child usage, MCP connector use, kernel boots, and feature
 /// outcomes count into `agent session ended` instead of their own events.
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn session_counters_ride_session_ended() {
     let fixture = fixture();
     let counters = Arc::new(SessionCounters::default());
@@ -553,6 +558,7 @@ async fn session_counters_ride_session_ended() {
 // This test's delivery task reads the same process-wide env as the assertion.
 // The current-thread runtime's task never acquires this test-only mutex.
 #[allow(clippy::await_holding_lock)]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn build_client_reuses_the_ts_installation_id_and_mirrors() {
     let _env_lock = crate::packages::test_support::ENV_MUTEX
         .lock()
@@ -588,6 +594,7 @@ async fn build_client_reuses_the_ts_installation_id_and_mirrors() {
 }
 
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn multiple_runs_merge_into_session_totals() {
     let fixture = fixture();
     let assistant = assistant_message();
@@ -615,6 +622,7 @@ async fn multiple_runs_merge_into_session_totals() {
 }
 
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn the_prompt_trigger_and_run_index_ride_the_completed_run() {
     let fixture = fixture();
     let assistant = assistant_message();
@@ -662,6 +670,7 @@ async fn the_prompt_trigger_and_run_index_ride_the_completed_run() {
 }
 
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn continuation_run_reports_continuation_trigger() {
     let fixture = fixture();
     let assistant = assistant_message();
@@ -717,6 +726,7 @@ fn attempt(fixture: &Fixture, message: AssistantMessage) {
 /// outcome of the final attempt, and the failed attempts folded into the
 /// error counters.
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn retries_fold_into_one_run_that_succeeds() {
     let fixture = fixture();
     let telemetry = SessionTelemetry::detached(
@@ -776,6 +786,7 @@ async fn retries_fold_into_one_run_that_succeeds() {
 /// A turn whose retries are exhausted is one run with the error outcome
 /// of its final attempt.
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn exhausted_retries_are_one_failed_run() {
     let fixture = fixture();
     let telemetry = SessionTelemetry::detached(
@@ -820,6 +831,7 @@ async fn exhausted_retries_are_one_failed_run() {
 /// A retry whose wait is cancelled closes its run: the next user turn is
 /// a run of its own, not a continuation of the abandoned retry.
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn a_cancelled_retry_never_absorbs_the_next_turn() {
     let fixture = fixture();
     let telemetry = SessionTelemetry::detached(
@@ -860,6 +872,7 @@ async fn a_cancelled_retry_never_absorbs_the_next_turn() {
 }
 
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn run_completed_v2_enrichment() {
     let fixture = fixture();
     let mut assistant = assistant_message();
@@ -901,6 +914,7 @@ async fn run_completed_v2_enrichment() {
 /// The stream-gap timing: the largest quiet stretch between model
 /// events reports on the run's timing stage.
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn stream_gap_tracks_the_largest_quiet_stretch() {
     let fixture = fixture();
     let assistant = assistant_message();
@@ -930,6 +944,7 @@ async fn stream_gap_tracks_the_largest_quiet_stretch() {
 /// an aborted run's terminal outcome is the #2117 `cancelled`, a tool failure never touches
 /// the model-failure chain, and a retry give-up never double-counts the chain.
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn bot_edges_the_trigger_lands_and_terminal_outcome_maps() {
     let fixture = fixture();
     let mut aborted = assistant_message();
@@ -962,6 +977,7 @@ async fn bot_edges_the_trigger_lands_and_terminal_outcome_maps() {
 /// with a tool call, end) posts TS-shaped bodies, and every legacy event
 /// carries the full TS property set in the TS vocabulary.
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn legacy_events_reach_the_analytics_endpoint_in_the_ts_shape() {
     use std::io::{Read, Write};
 
@@ -1212,6 +1228,7 @@ fn fixture_with_switch(telemetry_enabled: Arc<dyn Fn() -> bool + Send + Sync>) -
 /// is off nothing counts, so turning it on later never sends what
 /// happened while it was off.
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn off_period_session_counters_never_count() {
     let on = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let switch: Arc<dyn Fn() -> bool + Send + Sync> = {
@@ -1280,6 +1297,7 @@ async fn off_period_session_counters_never_count() {
 /// that happened in the off period never reports, and a later enable
 /// sends only what the on period recorded.
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn off_period_run_facts_never_send() {
     let on = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let switch: Arc<dyn Fn() -> bool + Send + Sync> = {
@@ -1349,6 +1367,7 @@ async fn off_period_run_facts_never_send() {
 /// the boundary cache; this proves only the raw switch has no cache of
 /// its own.
 #[test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 fn recording_switch_flips_immediately_with_the_settings() {
     let _env = CleanTelemetryEnv::default();
     let dir = tempfile::tempdir().unwrap();
@@ -1421,6 +1440,7 @@ fn a_disable_on_a_fresh_install_never_mints_the_install_id() {
 /// `AgentEnd` and the next run's `AgentStart` happen in the off period,
 /// and the next on-period run starts clean with only its own facts.
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn a_run_active_when_telemetry_turns_off_is_severed_not_merged() {
     let on = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let switch: Arc<dyn Fn() -> bool + Send + Sync> = {

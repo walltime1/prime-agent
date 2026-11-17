@@ -45,6 +45,7 @@ fn ts_body(events: &[TelemetryEvent]) -> serde_json::Value {
 }
 
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn batch_posts_the_exact_ts_request() {
     // The binary's runtime version (a beta restamps only the packaged
     // manifest) rides the User-Agent and every event, not the crate's.
@@ -83,6 +84,7 @@ async fn batch_posts_the_exact_ts_request() {
 }
 
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn the_client_batches_through_the_sink() {
     let (base, rx) = spawn_stub(vec![(202, json!({ "accepted": 2 }))]);
     let mut config = TelemetryClientConfig::new(INSTALL_ID);
@@ -105,6 +107,7 @@ async fn the_client_batches_through_the_sink() {
 }
 
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn failures_drop_the_batch() {
     let (base, rx) = spawn_stub(vec![
         (500, json!({ "detail": "boom" })),
@@ -126,6 +129,7 @@ async fn failures_drop_the_batch() {
 }
 
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn an_unreachable_endpoint_times_out_as_a_drop() {
     // A listener that never answers: the request timeout bounds the send.
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();

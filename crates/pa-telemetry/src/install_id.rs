@@ -11,6 +11,7 @@
 //! crash may lose the state file — it is re-created on the next boot and a
 //! torn file is invalid state, replaced atomically.
 
+#![allow(dead_code)] // State-file helpers are dead while install_id() is stubbed; kept for upstream rebases.
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -250,6 +251,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     fn creates_and_rereads() {
         let dir = tempfile::tempdir().unwrap();
         let first = install_id(dir.path()).unwrap();
@@ -274,6 +276,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     fn replaces_invalid_state() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(STATE_FILE);
@@ -321,6 +324,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     fn concurrent_create_stress_converges() {
         const ROUNDS: usize = 64;
         const THREADS: usize = 16;

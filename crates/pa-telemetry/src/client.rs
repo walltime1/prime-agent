@@ -22,6 +22,7 @@ pub const DEFAULT_QUEUE_CAPACITY: usize = 256;
 /// The batch byte cap (wire-body estimate).
 pub const DEFAULT_MAX_BATCH_BYTES: usize = 30_000;
 /// Retention: older entries expire on the next flush.
+#[allow(dead_code)] // Dead while spawn() is stubbed to inert(); kept for upstream rebases.
 pub const MAX_AGE: Duration = Duration::from_hours(24);
 
 /// The bounded delivery retry policy.
@@ -42,6 +43,7 @@ impl Default for RetryPolicy {
 }
 
 /// One queued event per sink channel.
+#[allow(dead_code)] // Dead while spawn() is stubbed to inert(); kept for upstream rebases.
 struct QueueEntry {
     event: TelemetryEvent,
     attempts: u32,
@@ -49,6 +51,7 @@ struct QueueEntry {
 
 /// One sink's delivery channel: its own bounded queue and backoff state, so
 /// a retried batch never re-delivers to a sink that already accepted it.
+#[allow(dead_code)] // Dead while spawn() is stubbed to inert(); kept for upstream rebases.
 struct Channel {
     sink: Arc<dyn TelemetrySink>,
     queue: VecDeque<QueueEntry>,
@@ -125,6 +128,7 @@ pub struct TelemetryClient {
     install_id: String,
 }
 
+#[allow(dead_code)] // Dead while spawn() is stubbed to inert(); kept for upstream rebases.
 enum Cmd {
     Track(TelemetryEvent),
     Flush(oneshot::Sender<()>),
@@ -153,7 +157,7 @@ impl TelemetryClient {
     ///
     /// Returns an error only when there is no tokio runtime on the current thread.
     pub fn spawn(config: TelemetryClientConfig) -> anyhow::Result<Self> {
-        let _ = config;
+        drop(config);
         Ok(Self::inert())
     }
 
@@ -216,6 +220,7 @@ impl TelemetryClient {
 
 /// Background worker: owns the per-sink channels, batching, interval, and
 /// sink fan-out.
+#[allow(dead_code)] // Dead while spawn() is stubbed to inert(); kept for upstream rebases.
 struct Worker {
     channels: Vec<Channel>,
     config: TelemetryClientConfig,
@@ -223,6 +228,7 @@ struct Worker {
     rx: mpsc::UnboundedReceiver<Cmd>,
 }
 
+#[allow(dead_code)] // Dead while spawn() is stubbed to inert(); kept for upstream rebases.
 impl Worker {
     async fn run(mut self) {
         let mut next_deadline = tokio::time::Instant::now() + self.config.flush_interval;
@@ -438,6 +444,7 @@ impl Worker {
     }
 }
 
+#[allow(dead_code)] // Dead while spawn() is stubbed to inert(); kept for upstream rebases.
 impl Channel {
     /// True when the channel may send now (`next_retry_at` passed or no
     /// failed batch waiting).
@@ -463,6 +470,7 @@ impl Channel {
 impl TelemetryClientConfig {
     /// The backoff after `attempts` failed sends:
     /// `min(max_backoff, flush_interval * 2^attempts)`.
+    #[allow(dead_code)] // Dead while spawn() is stubbed to inert(); kept for upstream rebases.
     fn retry_backoff(&self, attempts: u32) -> Duration {
         self.flush_interval
             .saturating_mul(1 << attempts.min(16))
@@ -515,6 +523,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn batch_size_triggers_flush() {
         let mock = Arc::new(MockSink::new());
         let client = client_with(mock.clone(), 3, Duration::from_secs(60));
@@ -530,6 +539,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn explicit_flush_drains_partial_batches() {
         let mock = Arc::new(MockSink::new());
         let client = client_with(mock.clone(), 10, Duration::from_secs(60));
@@ -542,6 +552,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn interval_flushes_without_batch_fill() {
         let mock = Arc::new(MockSink::new());
         let client = client_with(mock.clone(), 100, Duration::from_millis(30));
@@ -552,6 +563,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn shutdown_flushes_and_stops() {
         let mock = Arc::new(MockSink::new());
         let client = client_with(mock.clone(), 100, Duration::from_secs(60));
@@ -564,6 +576,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn base_properties_merge_under_event_properties() {
         let mock = Arc::new(MockSink::new());
         let mut config = TelemetryClientConfig::new("install-1");
@@ -597,6 +610,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn queue_cap_drops_oldest_per_channel() {
         let mock = Arc::new(MockSink::new());
         let mut config = TelemetryClientConfig::new("install-1");
@@ -617,6 +631,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn fan_out_delivers_to_every_sink() {
         let a = Arc::new(MockSink::new());
         let b = Arc::new(MockSink::new());
@@ -672,6 +687,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn failed_batch_retries_after_backoff_and_delivers_once() {
         let delivered = Arc::new(MockSink::new());
         let mut config = TelemetryClientConfig::new("install-1");
@@ -691,6 +707,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn permanently_failing_channel_expires_without_duplicating_sibling() {
         let failing = Arc::new(MockSink::failing());
         let healthy = Arc::new(MockSink::new());
@@ -719,6 +736,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn batch_byte_cap_splits_batches() {
         let mock = Arc::new(MockSink::new());
         let mut config = TelemetryClientConfig::new("install-1");
@@ -798,6 +816,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn flush_sanitizes_events_against_the_catalog() {
         let mock = Arc::new(MockSink::new());
         let client = client_with(mock.clone(), 1, Duration::from_secs(60));

@@ -339,6 +339,7 @@ mod tests {
     /// Interactions while telemetry is off never count, so a later
     /// `/telemetry on` cannot send them with `tui exit`.
     #[test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     fn interactions_while_off_never_count() {
         crate::mode::tests::with_clean_telemetry_env(|| {
             futures::executor::block_on(count_interactions_while_off());
@@ -373,6 +374,7 @@ mod tests {
     /// The agents view shares one telemetry handle across the sessions it
     /// opens: each `tui exit` reports only its own run's interactions.
     #[test]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     fn each_tui_exit_reports_only_its_own_run() {
         crate::mode::tests::with_clean_telemetry_env(|| {
             tokio::runtime::Runtime::new()

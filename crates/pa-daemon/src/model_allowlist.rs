@@ -303,6 +303,7 @@ mod tests {
         not(debug_assertions),
         ignore = "release builds send to the real endpoint"
     )]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn refusal_telemetry_honors_both_opt_outs() {
         let _telemetry = crate::agent_engine::tests::telemetry_opt_in();
         let dir = tempfile::tempdir().expect("tempdir");
@@ -333,6 +334,7 @@ mod tests {
         not(debug_assertions),
         ignore = "release builds send to the real endpoint"
     )]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn refusal_telemetry_dedupes_repeated_resolves() {
         let _telemetry = crate::agent_engine::tests::telemetry_opt_in();
         let dir = tempfile::tempdir().expect("tempdir");
@@ -355,6 +357,7 @@ mod tests {
         not(debug_assertions),
         ignore = "release builds send to the real endpoint"
     )]
+    #[ignore = "telemetry delivery is stubbed out in this fork"]
     async fn refusal_telemetry_rebinds_when_the_cwd_moves() {
         let _telemetry = crate::agent_engine::tests::telemetry_opt_in();
         let dir = tempfile::tempdir().expect("tempdir");
