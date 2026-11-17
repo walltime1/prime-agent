@@ -134,6 +134,12 @@ pub(crate) fn attach_capabilities() -> Vec<pa_types::daemon::DaemonClientCapabil
     ]
 }
 
+/// The active workspace shown in the top bar; `None` when no agent dir resolves or none is set.
+pub(crate) fn active_workspace_name() -> Option<String> {
+    let agent_dir = pa_types::platform::agent_dir()?;
+    pa_types::workspace::read_active_workspace(&agent_dir)
+}
+
 pub(crate) fn last_assistant_text_of(chat: &[ChatEntry]) -> Option<String> {
     chat.iter().rev().find_map(|entry| match entry {
         ChatEntry::Assistant(message) => {

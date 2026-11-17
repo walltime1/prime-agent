@@ -8,16 +8,62 @@ use serde_json::Value;
 
 use crate::theme::{Theme, ThemeBg, ThemeColor};
 
-/// The compact 7-row brand butterfly.
-pub const PRIME_COMPACT_BUTTERFLY_LOGO: &str = concat!(
-    "                 \u{2597}\u{2584}\u{2584}\u{2588}\u{2580}\n",
-    "   \u{2588}\u{2588}\u{2588}\u{2584}       \u{2597}\u{2584}\u{2588}\u{2588}\u{2588}\u{2580}\n",
-    "  \u{2597}\u{2588}\u{259b}\u{2590}\u{2588}\u{2599}   \u{2597}\u{2584}\u{2588}\u{2580}\u{2597}\u{2588}\u{2580}\n",
-    " \u{2597}\u{2588}\u{259b} \u{259f}\u{2588}\u{2588}\u{2599}\u{2584}\u{2588}\u{2588}\u{259b} \u{259f}\u{259b}\n",
-    " \u{2597}\u{259f}\u{258c} \u{2590}\u{2588}\u{2588}\u{2588}\u{259b}\u{2598}\u{2597}\u{2584}\u{2588}\u{2596}\n",
-    "\u{259f}\u{2588}\u{2588}\u{2588}\u{2584}  \u{2584}\u{2584}\u{259f}\u{2588}\u{2588}\u{2588}\u{2580}\n",
-    "\u{259c}\u{2588}\u{259b}\u{2580}\u{2598}  \u{259c}\u{2588}\u{259b}\u{2580}\u{2598}",
-);
+/// The compact 7-row Walltime mark: a pillar, a clock, and a sloped roof
+/// with its post. [`WALLTIME_LOGO_MASK`] colours each cell.
+pub const WALLTIME_LOGO: [&str; 7] = [
+    "   ▄▄▄▄▄▄▖     ",
+    "▄▄ ▀▀▀▀▀▀▀▀▀▄▄▄",
+    "██  ▄▀▀▀▀▀▄  ██",
+    "██ █   ▌▗▀ █ ██",
+    "██ █   ▀   █ ██",
+    "██  ▀▄▄▄▄▄▀  ██",
+    "▀▀           ▀▀",
+];
+
+/// Per-cell colour of [`WALLTIME_LOGO`]: `t` is the brand teal, anything
+/// else the theme text colour (the mark's navy would vanish on dark canvases).
+const WALLTIME_LOGO_MASK: [&str; 7] = [
+    "   ttttttt     ",
+    "nn tttttttttttt",
+    "nn  nnnnnnn  tt",
+    "nn nnnnnnnnn tt",
+    "nn nnnnnnnnn tt",
+    "nn  nnnnnnn  tt",
+    "nn           tt",
+];
+
+const WALLTIME_TEAL: (u8, u8, u8) = (3, 160, 180);
+
+fn walltime_teal(theme: &Theme) -> Style {
+    let color = match theme.mode {
+        crate::theme::ColorMode::Color256 => {
+            ratatui::style::Color::Indexed(crate::theme::rgb_to_256(WALLTIME_TEAL))
+        }
+        crate::theme::ColorMode::TrueColor => {
+            ratatui::style::Color::Rgb(WALLTIME_TEAL.0, WALLTIME_TEAL.1, WALLTIME_TEAL.2)
+        }
+    };
+    Style::default().fg(color)
+}
+
+/// One logo row split into same-colour runs.
+fn walltime_logo_spans(row: usize, text: Style, teal: Style) -> Vec<Span> {
+    let mut spans: Vec<Span> = Vec::new();
+    let mut run = String::new();
+    let mut run_is_teal = false;
+    for (glyph, mask) in WALLTIME_LOGO[row].chars().zip(WALLTIME_LOGO_MASK[row].chars()) {
+        let is_teal = mask == 't';
+        if is_teal != run_is_teal && !run.is_empty() {
+            spans.push(Span::styled(std::mem::take(&mut run), if run_is_teal { teal } else { text }));
+        }
+        run_is_teal = is_teal;
+        run.push(glyph);
+    }
+    if !run.is_empty() {
+        spans.push(Span::styled(run, if run_is_teal { teal } else { text }));
+    }
+    spans
+}
 
 /// Truncate a plain string to a visible width (cut on grapheme
 /// boundaries, appending the ellipsis).
@@ -58,6 +104,8 @@ pub struct ChromeState {
     /// Session spend (USD) beside the chat name: the family rollup (the
     /// session's spend plus every subagent descendant's).
     pub cost_usd: Option<f64>,
+    /// Active workspace name (top bar `ws:<name>`); `None` renders nothing.
+    pub workspace: Option<String>,
     /// Context usage: tokens, window, percent (tray right label).
     pub context: Option<ContextUsage>,
     /// `← manage` hint: shown for persisted (attachable) sessions.
@@ -350,17 +398,21 @@ pub fn render_top_bar(state: &ChromeState, theme: &Theme, width: usize) -> Line 
         line.push(Span::styled("  ".to_string(), Style::default()));
         line.push(Span::styled(format!("${cost:.2}"), dim));
     }
+    if let Some(workspace) = state.workspace.as_deref().filter(|name| !name.is_empty()) {
+        line.push(Span::styled("  ".to_string(), Style::default()));
+        line.push(Span::styled(format!("ws:{workspace}"), dim));
+    }
     line
 }
 
-/// The brand splash: butterfly logo beside the version/model/cwd metadata
+/// The brand splash: Walltime logo beside the version/model/cwd metadata
 /// (TS `BrandSplashHeader`, `topPadding` always on).
 #[must_use]
 pub fn render_splash(state: &ChromeState, theme: &Theme, width: usize) -> Vec<Line> {
     let safe_width = width.max(1);
     let padding_x = usize::from(safe_width > 1);
     let content_width = safe_width.saturating_sub(padding_x * 2).max(1);
-    let logo_raw: Vec<&str> = PRIME_COMPACT_BUTTERFLY_LOGO.split('\n').collect();
+    let logo_raw = WALLTIME_LOGO;
     let logo_canvas_width = logo_raw
         .iter()
         .map(|line| str_width(line))
@@ -433,13 +485,16 @@ pub fn render_splash(state: &ChromeState, theme: &Theme, width: usize) -> Vec<Li
         0
     };
     let logo_text = theme.fg_style(ThemeColor::Text);
+    let logo_teal = walltime_teal(theme);
     for index in 0..row_count {
         let mut spans: Line = Vec::new();
         let pad = if padding_x > 0 { " " } else { "" };
         spans.push(Span::styled(pad.to_string(), Style::default()));
         if show_logo {
             let logo_line = logo_raw.get(index).copied().unwrap_or("");
-            spans.push(Span::styled(logo_line.to_string(), logo_text));
+            if index < logo_raw.len() {
+                spans.extend(walltime_logo_spans(index, logo_text, logo_teal));
+            }
             let fill = logo_canvas_width.saturating_sub(str_width(logo_line)) + gutter;
             spans.push(Span::styled(" ".repeat(fill), Style::default()));
         }

@@ -836,9 +836,9 @@ fn splash_renders_logo_version_model_and_cwd() {
     assert!(lines.iter().any(|l| text(l).contains("prime agent v0.0.0")));
     assert!(lines.iter().any(|l| text(l).contains("model faux-1")));
     assert!(lines.iter().any(|l| text(l).contains("cwd /tmp/project")));
-    assert!(lines
-        .iter()
-        .any(|l| text(l).contains("\u{2597}\u{2584}\u{2584}")));
+    assert!(lines.iter().any(|l| text(l).contains("██ █   ▌▗▀ █ ██")));
+    assert!(lines.iter().flatten().any(|span| span.content.contains("▄▄▄▄▄▄▖")
+        && span.style.fg != theme().fg_style(ThemeColor::Text).fg));
 }
 
 #[test]
@@ -853,6 +853,23 @@ fn top_bar_centers_name_with_cost() {
     assert!(text.contains("shared-cwd  $0.00"));
     let start = text.find("shared-cwd").unwrap();
     assert_eq!(start, 55);
+}
+
+#[test]
+fn top_bar_shows_the_active_workspace_only_when_set() {
+    let state = |workspace: Option<&str>| ChromeState {
+        chat_name: "shared-cwd".to_string(),
+        workspace: workspace.map(str::to_string),
+        ..Default::default()
+    };
+    let text = |state: &ChromeState| {
+        render_top_bar(state, &theme(), 120)
+            .iter()
+            .map(|s| s.content.as_str())
+            .collect::<String>()
+    };
+    assert!(text(&state(Some("proj-a"))).contains("ws:proj-a"));
+    assert!(!text(&state(None)).contains("ws:"));
 }
 
 #[test]

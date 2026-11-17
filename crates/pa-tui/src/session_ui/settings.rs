@@ -828,6 +828,8 @@ impl SessionUi {
                 // The view rebuilds from the durable session store, so client status rows
                 // drop exactly like the TS re-mount.
                 self.rebuild_transcript(view).await;
+                // `/workspace` reloads right after writing the selection, so the top bar follows it here.
+                view.chrome.workspace = crate::session_ui::active_workspace_name();
                 // The Rust editor consumes the keybinding set, so the reloaded manager
                 // replaces it.
                 let mut keybindings = view.editor.keybindings().clone();
