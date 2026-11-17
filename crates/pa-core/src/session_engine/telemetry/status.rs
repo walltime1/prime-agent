@@ -53,11 +53,8 @@ impl TelemetrySwitch {
 
 /// Resolve the switch from the environment and `settings`.
 #[must_use]
-pub fn telemetry_switch(settings: &SettingsManager) -> TelemetrySwitch {
-    switch_from(
-        |var| std::env::var(var).ok(),
-        settings.telemetry_enabled_setting(),
-    )
+pub fn telemetry_switch(_settings: &SettingsManager) -> TelemetrySwitch {
+    TelemetrySwitch::Settings(false)
 }
 
 /// The environment variables that decide the switch (see [`TelemetrySwitch`]).
@@ -88,69 +85,30 @@ fn switch_from(env: impl Fn(&str) -> Option<String>, setting: Option<bool>) -> T
 /// development never reach production analytics.
 #[must_use]
 pub fn telemetry_endpoint() -> Option<&'static str> {
-    (!cfg!(debug_assertions)).then_some(pa_telemetry::ANALYTICS_ENDPOINT)
+    None
 }
 
-/// The `status` report: state and why, the endpoint, the installation id.
+/// The `status` report. Telemetry is stubbed out, so this always says that
+/// nothing is collected or sent.
 #[must_use]
-pub fn telemetry_status_text(settings: &SettingsManager, agent_dir: &Path) -> String {
-    let switch = telemetry_switch(settings);
-    let state = if switch.enabled() { "on" } else { "off" };
-    let endpoint = telemetry_endpoint().unwrap_or("nowhere (development build)");
-    let installation_id = pa_telemetry::existing_install_id(agent_dir)
-        .unwrap_or_else(|| "not created yet".to_string());
-    format!(
-        "Telemetry is {state} ({}).\nEndpoint: {endpoint}\nInstallation id: {installation_id}",
-        switch.reason()
-    )
+pub fn telemetry_status_text(_settings: &SettingsManager, _agent_dir: &Path) -> String {
+    "Telemetry is disabled in this build. Nothing is collected or sent.".to_string()
 }
 
 /// Persist `telemetry.enabled` (the TS key: global `settings.json`
-/// `{"telemetry": {"enabled": <bool>}}`) and report the result. Running
-/// clients pick the change up at their next delivery pass. When something
-/// else still decides (an environment variable, a project setting), the
-/// report says so instead of claiming the requested state.
+/// `{"telemetry": {"enabled": <bool>}}`) and report that it has no effect,
+/// since telemetry is stubbed out in this build.
 ///
 /// # Errors
 ///
-/// Returns an error when the global settings file cannot be written, or
-/// when the telemetry-state lock stays contended past its retry window:
-/// the command fails before anything changes (an opt-out whose epoch
-/// cannot move must not report success).
+/// Returns an error when the global settings file cannot be written.
 pub fn set_telemetry_enabled_text(
     settings: &mut SettingsManager,
-    agent_dir: &Path,
+    _agent_dir: &Path,
     enabled: bool,
 ) -> anyhow::Result<String> {
-    // The opt-out is the settings write itself and cannot fail on
-    // telemetry state: the recording seams re-check the live switch at
-    // turn boundaries and the client drops every queued event while the
-    // switch is off, which covers the off period without a persisted
-    // epoch — so the command never touches (and never mints) the
-    // install-id state.
     settings.set_telemetry_enabled(enabled)?;
-    let switch = telemetry_switch(&settings.reopen());
-    let requested = if enabled { "on" } else { "off" };
-    let headline = if switch.enabled() == enabled {
-        if enabled {
-            "Telemetry turned on.".to_string()
-        } else {
-            "Telemetry turned off. Nothing more is sent; unsent events are dropped.".to_string()
-        }
-    } else {
-        format!(
-            "Saved telemetry {requested} in settings, but it stays {} ({}).",
-            if switch.enabled() { "on" } else { "off" },
-            match switch {
-                TelemetrySwitch::Settings(_) => "a project setting overrides it".to_string(),
-                other => other.reason(),
-            }
-        )
-    };
-    Ok(format!(
-        "{headline}\n{}",
-        telemetry_status_text(settings, agent_dir)
-    ))
+    Ok("Telemetry is disabled in this build; the setting was saved but has no effect.".to_string())
 }
 
 #[cfg(test)]
@@ -243,19 +201,13 @@ mod tests {
     }
 
     #[test]
-    fn status_names_the_endpoint_and_the_installation_id() {
+    fn status_says_telemetry_is_disabled_in_this_build() {
         let dir = tempfile::tempdir().unwrap();
         let agent_dir = dir.path().join("agent");
         let settings = SettingsManager::create(dir.path(), &agent_dir);
-        let before = telemetry_status_text(&settings, &agent_dir);
-        assert!(before.contains("Installation id: not created yet"));
-        assert!(
-            !agent_dir.join("telemetry.json").exists(),
-            "status never creates an id"
+        assert_eq!(
+            telemetry_status_text(&settings, &agent_dir),
+            "Telemetry is disabled in this build. Nothing is collected or sent."
         );
-        let id = pa_telemetry::install_id(&agent_dir).unwrap();
-        let after = telemetry_status_text(&settings, &agent_dir);
-        assert!(after.contains(&format!("Installation id: {id}")));
-        assert!(after.contains("Endpoint: nowhere (development build)"));
     }
 }

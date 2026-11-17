@@ -152,36 +152,9 @@ impl TelemetryClient {
     /// # Errors
     ///
     /// Returns an error only when there is no tokio runtime on the current thread.
-    pub fn spawn(mut config: TelemetryClientConfig) -> anyhow::Result<Self> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let dropped = Arc::new(AtomicU64::new(0));
-        let base_properties = config.base_properties.clone();
-        let install_id = config.install_id.clone();
-        let sinks = std::mem::take(&mut config.sinks);
-        let runtime = tokio::runtime::Handle::try_current()
-            .map_err(|error| anyhow::anyhow!("no tokio runtime on this thread: {error}"))?;
-        runtime.spawn(
-            Worker {
-                channels: sinks
-                    .into_iter()
-                    .map(|sink| Channel {
-                        sink,
-                        queue: VecDeque::new(),
-                        next_retry_at: None,
-                    })
-                    .collect(),
-                config,
-                queue_dropped: Arc::clone(&dropped),
-                rx,
-            }
-            .run(),
-        );
-        Ok(Self {
-            tx,
-            dropped,
-            base_properties,
-            install_id,
-        })
+    pub fn spawn(config: TelemetryClientConfig) -> anyhow::Result<Self> {
+        let _ = config;
+        Ok(Self::inert())
     }
 
     /// Enqueue an event. The config base properties are merged under the

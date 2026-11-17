@@ -126,10 +126,7 @@ impl TelemetrySink for FileSink {
         events: Vec<TelemetryEvent>,
     ) -> Pin<Box<dyn Future<Output = SinkOutcome> + Send + '_>> {
         Box::pin(async move {
-            if let Err(err) = self.write_batch(install_id, events).await {
-                tracing::warn!(path = %self.path.display(), error = %err, "telemetry mirror write failed");
-                return SinkOutcome::Dropped;
-            }
+            let _ = (&self.path, self.max_bytes, install_id, events);
             SinkOutcome::Sent
         })
     }

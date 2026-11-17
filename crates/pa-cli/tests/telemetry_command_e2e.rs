@@ -39,28 +39,22 @@ fn status_on_and_off_round_trip() {
 
     let (code, out) = run(sandbox, &["telemetry"], &[]);
     assert_eq!(code, Some(0), "{out}");
-    assert!(out.contains("Telemetry is on (on by default)."), "{out}");
-    assert!(out.contains("Installation id: not created yet"), "{out}");
+    assert_eq!(
+        out.trim(),
+        "Telemetry is disabled in this build. Nothing is collected or sent."
+    );
 
     let (code, out) = run(sandbox, &["telemetry", "off"], &[]);
     assert_eq!(code, Some(0), "{out}");
-    assert!(out.contains("Telemetry turned off."), "{out}");
+    assert_eq!(
+        out.trim(),
+        "Telemetry is disabled in this build; the setting was saved but has no effect."
+    );
     assert_eq!(saved_switch(sandbox), serde_json::json!(false));
-    let (_, out) = run(sandbox, &["telemetry", "status"], &[]);
-    assert!(
-        out.contains("Telemetry is off (turned off in settings)."),
-        "{out}"
-    );
 
-    let (code, out) = run(sandbox, &["telemetry", "on"], &[("DO_NOT_TRACK", "1")]);
-    assert_eq!(code, Some(0), "{out}");
+    let (code, _) = run(sandbox, &["telemetry", "on"], &[("DO_NOT_TRACK", "1")]);
+    assert_eq!(code, Some(0));
     assert_eq!(saved_switch(sandbox), serde_json::json!(true));
-    assert!(
-        out.contains(
-            "Saved telemetry on in settings, but it stays off (forced off by DO_NOT_TRACK)."
-        ),
-        "{out}"
-    );
 
     let (code, _) = run(sandbox, &["telemetry", "maybe"], &[]);
     assert_eq!(code, Some(1));

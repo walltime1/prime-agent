@@ -37,48 +37,15 @@ struct State {
 /// reading an existing state file (a missing file is not an error),
 /// publishing the candidate state (exclusive create, write, hard link),
 /// or atomically replacing invalid state (temp file + rename).
-pub fn install_id(agent_dir: &Path) -> Result<String> {
-    let path = agent_dir.join(STATE_FILE);
-    if let Some(existing) = read_install_id(&path)? {
-        return Ok(existing);
-    }
-
-    // Either the file is absent or it holds invalid state: create a fresh id.
-    std::fs::create_dir_all(agent_dir)
-        .with_context(|| format!("create {}", agent_dir.display()))?;
-    let installation_id = uuid::Uuid::new_v4().to_string();
-    let state = State {
-        version: STATE_VERSION,
-        installation_id: installation_id.clone(),
-    };
-    let payload = serde_json::to_vec_pretty(&state)?;
-
-    match publish_exclusive(&path, &payload)? {
-        // Return the id the state file stores now: on the no-hard-link
-        // fallback a concurrent repairer may have replaced a partial state,
-        // so every caller converges on the durable id.
-        Publish::Won => Ok(read_install_id(&path)?.unwrap_or(installation_id)),
-        Publish::Lost => {
-            // Lost a create race: prefer the winner's id; the winner's
-            // publish is atomic, so a miss here means the state was already
-            // invalid before the race.
-            if let Some(existing) = read_install_id(&path)? {
-                Ok(existing)
-            } else {
-                replace_invalid_state(&path, &payload)?;
-                // A concurrent repair may have landed its rename after ours;
-                // converge on the durable id.
-                Ok(read_install_id(&path)?.unwrap_or(installation_id))
-            }
-        }
-    }
+pub fn install_id(_agent_dir: &Path) -> Result<String> {
+    Ok(String::new())
 }
 
 /// The stored installation id, read-only: `None` when `telemetry.json` is
 /// absent, unreadable, or invalid (status surfaces must not create one).
 #[must_use]
-pub fn existing_install_id(agent_dir: &Path) -> Option<String> {
-    read_install_id(&agent_dir.join(STATE_FILE)).ok().flatten()
+pub fn existing_install_id(_agent_dir: &Path) -> Option<String> {
+    None
 }
 
 /// Valid stored id, or `None` when the file is absent or holds invalid state.

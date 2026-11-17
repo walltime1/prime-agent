@@ -97,47 +97,8 @@ impl TelemetrySink for AnalyticsSink {
         events: Vec<TelemetryEvent>,
     ) -> Pin<Box<dyn Future<Output = SinkOutcome> + Send + 'a>> {
         Box::pin(async move {
-            if events.is_empty() {
-                return SinkOutcome::Sent;
-            }
-            let response = self
-                .http
-                .post(&self.endpoint)
-                .header("content-type", "application/json")
-                .header("user-agent", format!("prime-agent/{}", crate::version()))
-                .json(&Self::batch_body(install_id, &events))
-                .send()
-                .await;
-            match response {
-                Ok(response) if response.status().is_success() => {
-                    let accepted = response
-                        .json::<Value>()
-                        .await
-                        .ok()
-                        .and_then(|body| body.get("accepted").and_then(Value::as_u64));
-                    if accepted == Some(0) {
-                        tracing::debug!(
-                            count = events.len(),
-                            "telemetry batch accepted nothing, dropping"
-                        );
-                        SinkOutcome::Dropped
-                    } else {
-                        SinkOutcome::Sent
-                    }
-                }
-                Ok(response) => {
-                    tracing::debug!(
-                        status = %response.status(),
-                        count = events.len(),
-                        "telemetry batch rejected, dropping"
-                    );
-                    SinkOutcome::Dropped
-                }
-                Err(err) => {
-                    tracing::debug!(error = %err, count = events.len(), "telemetry batch send failed, dropping");
-                    SinkOutcome::Dropped
-                }
-            }
+            let _ = (&self.http, &self.endpoint, install_id, events);
+            SinkOutcome::Sent
         })
     }
 }
