@@ -46,13 +46,19 @@ pub(crate) fn refinement_outcome_entries(message: &Value, details: &Value) -> Ve
         .collect();
     let rollback_of = details.get("rollbackOf").and_then(Value::as_str);
     let outcome = refinement_outcome_line(edits, &applied, rollback_of);
+    // A workspace-pinned session's global refinement wrote the workspace store, not global.
+    let workspace_label = details
+        .get("workspace")
+        .and_then(Value::as_str)
+        .map(|workspace| format!(" \u{b7} workspace {workspace}"))
+        .unwrap_or_default();
     let header = if outcome.starts_with("Harness refined \u{b7}") {
-        "Harness refined".to_string()
+        format!("Harness refined{workspace_label}")
     } else {
-        outcome.clone()
+        format!("{outcome}{workspace_label}")
     };
     let meta = format!(
-        "{outcome} \u{b7} Refinement {} \u{b7} {}{}",
+        "{outcome} \u{b7} Refinement {} \u{b7} {}{workspace_label}{}",
         details
             .get("refinementId")
             .and_then(Value::as_str)
@@ -563,6 +569,25 @@ mod tests {
             panic!("empty-edits refinement row: {empty:?}");
         };
         assert_eq!(row.header, "Harness unchanged \u{b7} no edits applied");
+
+        // A workspace-pinned global refinement names the workspace it wrote.
+        let workspace = decoded(&json!({
+            "role": "custom",
+            "customType": REFINEMENT_OUTCOME_CUSTOM_TYPE,
+            "content": "Refinement complete: ? (workspace 'demo')",
+            "display": true,
+            "details": { "refinementId": "x", "summary": "?", "scope": "global", "workspace": "demo", "edits": [] },
+        }));
+        let [ChatEntry::RefinementOutcome(row)] = workspace.as_slice() else {
+            panic!("workspace refinement row: {workspace:?}");
+        };
+        assert_eq!(
+            (row.header.as_str(), row.meta.as_str()),
+            (
+                "Harness unchanged \u{b7} no edits applied \u{b7} workspace demo",
+                "Harness unchanged \u{b7} no edits applied \u{b7} Refinement x \u{b7} global \u{b7} workspace demo",
+            )
+        );
 
         // An unknown scope fails the envelope check and renders the notice.
         let malformed = decoded(&json!({

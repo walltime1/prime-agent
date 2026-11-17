@@ -77,6 +77,9 @@ pub enum TurnUpdate {
     /// ended under an abort (the daemon's wire marker — absent when the
     /// run settled on its own).
     Idle { aborted: bool },
+    /// `refine_failed`: a background refinement ended without committing; the error
+    /// message is the only trace (a success lands as its outcome row instead).
+    RefineFailed { error: String },
     /// `compaction_start`: a compaction run began.
     CompactionStart {
         /// Why the compaction runs (`manual`/`requested`/`overflow`/`threshold`).
@@ -407,6 +410,13 @@ pub fn event_to_update(event: &Value) -> Option<TurnUpdate> {
                 .get("runId")
                 .and_then(Value::as_str)
                 .map(str::to_string),
+        }),
+        "refine_failed" => Some(TurnUpdate::RefineFailed {
+            error: event
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown error")
+                .to_string(),
         }),
         "bash_output" => Some(TurnUpdate::BashOutput {
             chunk: event

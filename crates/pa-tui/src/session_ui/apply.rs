@@ -759,6 +759,9 @@ impl SessionUi {
                 self.sync_queue_selection(view);
             }
             TurnUpdate::StatusUpdate => {}
+            TurnUpdate::RefineFailed { error } => {
+                self.error_row(&format!("Refinement failed: {error}"), view);
+            }
         }
         self.dirty = true;
     }

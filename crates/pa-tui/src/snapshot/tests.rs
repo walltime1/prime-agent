@@ -1237,6 +1237,18 @@ fn aborted_attempts_never_collapse() {
 }
 
 #[test]
+fn decodes_refine_failed_with_its_error() {
+    assert_eq!(
+        event_to_update(
+            &json!({ "type": "refine_failed", "error": "Refiner did not return a JSON object" })
+        ),
+        Some(TurnUpdate::RefineFailed {
+            error: "Refiner did not return a JSON object".to_string(),
+        })
+    );
+}
+
+#[test]
 fn decodes_auto_retry_events() {
     let start = event_to_update(&json!({
         "type": "auto_retry_start",

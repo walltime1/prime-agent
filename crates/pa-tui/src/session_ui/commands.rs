@@ -91,7 +91,17 @@ impl SessionUi {
         // canonical name, before the command runs.
         self.track_command_used(resolved.name);
         match command.execution {
-            SlashCommandExecution::Session => self.send_prompt(text, behavior, view),
+            SlashCommandExecution::Session => {
+                self.send_prompt(text, behavior, view)?;
+                // A refinement plans in the background and reports only when it lands.
+                if resolved.name == "refine" {
+                    self.note(
+                        "Refining harness… the result shows here when it is ready.",
+                        view,
+                    );
+                }
+                Ok(())
+            }
             SlashCommandExecution::Client => {
                 self.dispatch_client_command(&resolved, text, view).await
             }
