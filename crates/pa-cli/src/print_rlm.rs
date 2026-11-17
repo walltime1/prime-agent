@@ -421,9 +421,7 @@ pub(crate) async fn drive_to_quiescence(
 /// keep listening — a settled child re-runs on a later message until it
 /// is disposed or deleted (TS `child.isSessionActive`).
 async fn drive_child(child: Arc<InlineChild>) {
-    let global_harness_dir = pa_core::refinement::get_active_harness_state_dir(
-        &child.node.recipe.options.config.agent_dir,
-    );
+    let global_harness_dir = child.engine.harness_write_dir.clone();
     loop {
         let mut boundary = TurnBoundary::new(/*json_mode*/ false);
         let run_error = drive_to_quiescence(

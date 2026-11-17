@@ -669,6 +669,8 @@ impl SessionUi {
         let _ = self.queue_selection.reset();
         view.queue_selected = None;
         view.chrome.chat_name = self.session_display();
+        let session_file = self.session_file.as_deref();
+        view.chrome.workspace = crate::session_ui::active_workspace_name(session_file);
         view.chrome.context = self.context;
         // The rebuilt transcript invalidates the announcement row tracking;
         // the goal state itself carries over (seeded at attach).

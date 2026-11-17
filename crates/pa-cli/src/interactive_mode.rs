@@ -451,6 +451,9 @@ fn build_tui_options(
             }
         }
     }
+    if let SessionSelection::Resume(path) = &session {
+        pin_resumed_session_workspace(path, &options.session.workspace_selection)?;
+    }
     let options = &resolved_options;
     let config = &options.config;
     let settings = pa_core::settings::SettingsManager::create(&config.cwd, &config.agent_dir);
@@ -477,6 +480,11 @@ fn build_tui_options(
     ));
     let (onboarding, pending_onboarding_stages) =
         onboarding_task(options, Some(provider_auth.clone()));
+    pa_tui::interactive::set_startup_workspace(match &options.session.workspace_selection {
+        pa_core::session_engine::engine::WorkspaceSelection::Inherit => None,
+        pa_core::session_engine::engine::WorkspaceSelection::Global => Some("global".to_string()),
+        pa_core::session_engine::engine::WorkspaceSelection::Named(name) => Some(name.clone()),
+    });
     let tui_options_value = InteractiveOptions {
         code_block_indent,
         tree_filter_mode,
@@ -553,6 +561,23 @@ fn build_tui_options(
 
 /// Map the CLI session flags onto the TUI session selection: explicit `--resume`
 /// selector, then a fresh session (`--continue` goes through the agents view).
+/// Pin a resumed session's workspace record before the daemon opens it: the record
+/// wins over the default pointer, so an explicit `--workspace` must land there.
+fn pin_resumed_session_workspace(
+    path: &Path,
+    selection: &pa_core::session_engine::engine::WorkspaceSelection,
+) -> Result<()> {
+    let workspace = match selection {
+        pa_core::session_engine::engine::WorkspaceSelection::Inherit => return Ok(()),
+        pa_core::session_engine::engine::WorkspaceSelection::Global => None,
+        pa_core::session_engine::engine::WorkspaceSelection::Named(name) => Some(name.as_str()),
+    };
+    let artifact_dir = pa_types::workspace::session_artifact_dir_for_log(path)
+        .ok_or_else(|| anyhow!("cannot locate artifacts for session {}", path.display()))?;
+    pa_types::workspace::write_session_workspace(&artifact_dir, workspace)?;
+    Ok(())
+}
+
 fn session_selection(
     session: &crate::mode::SessionOptions,
     session_dir: Option<&Path>,

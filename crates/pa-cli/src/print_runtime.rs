@@ -830,6 +830,7 @@ pub(crate) async fn build_headless_engine_with(
     };
     let engine = pa_core::session_engine::engine::create_session(
         pa_core::session_engine::engine::SessionEngineConfig {
+            workspace_selection: options.session.workspace_selection.clone(),
             on_late_sent_agent_message,
             cron_store: None,
             semantic_edges,
@@ -1519,8 +1520,7 @@ pub(crate) async fn run_prompts_and_emit(
     options: &RunOptions,
     root_node: &std::sync::Arc<crate::print_rlm::InlineSessionNode>,
 ) -> Result<i32, String> {
-    let global_harness_dir =
-        pa_core::refinement::get_active_harness_state_dir(&options.config.agent_dir);
+    let global_harness_dir = engine.harness_write_dir.clone();
     let mut boundary = crate::print_boundary::TurnBoundary::new(options.app_mode == AppMode::Json);
     let exit = run_prompts(
         engine,

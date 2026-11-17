@@ -348,3 +348,142 @@ async fn an_in_memory_fork_cancels_a_refinement_planned_on_the_abandoned_branch(
     )));
     pa_ai::registry::unregister_api_providers(HELD_PLANNER_API);
 }
+
+const WORKSPACE_PLANNER_API: &str = "test-rpc-workspace-planner";
+
+/// A planning provider that immediately proposes one global memory per call.
+struct WorkspacePlanner {
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl pa_ai::registry::Provider for WorkspacePlanner {
+    fn api(&self) -> &str {
+        WORKSPACE_PLANNER_API
+    }
+
+    fn stream(
+        &self,
+        _model: &pa_types::ai::Model,
+        _context: &pa_ai::types::Context,
+        _options: Option<&pa_ai::types::StreamOptions>,
+    ) -> pa_ai::AssistantMessageEventStream {
+        let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let (writer, stream) = pa_ai::AssistantMessageEventStream::new();
+        let message = pa_ai::faux::faux_assistant_text_message(
+            &format!(
+                r#"{{"summary":"lesson {call}","edits":[{{"action":"create","kind":"memory","id":"lesson-{call}","title":"Lesson","content":"durable {call}"}}]}}"#
+            ),
+            pa_ai::faux::FauxAssistantMessageOptions::default(),
+        );
+        writer.push(pa_types::ai::AssistantMessageEvent::Done {
+            reason: pa_types::ai::DoneStopReason::Stop,
+            message: message.clone(),
+        });
+        writer.end(Some(message));
+        stream
+    }
+
+    fn stream_simple(
+        &self,
+        model: &pa_types::ai::Model,
+        context: &pa_ai::types::Context,
+        _options: Option<&pa_ai::types::SimpleStreamOptions>,
+    ) -> pa_ai::AssistantMessageEventStream {
+        self.stream(model, context, None)
+    }
+}
+
+/// The daemon `refine` command writes to the session's pinned workspace: a
+/// default switched by another session after this one started does not move
+/// its writes, while a session created afterwards picks up the new default.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_refine_writes_to_the_session_pinned_workspace() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path().join("project");
+    let agent_dir = dir.path().join("agent");
+    std::fs::create_dir_all(&cwd).unwrap();
+    std::fs::create_dir_all(&agent_dir).unwrap();
+    pa_ai::registry::register_api_provider(
+        Arc::new(WorkspacePlanner {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        }),
+        Some(WORKSPACE_PLANNER_API),
+    );
+    let rpc_state = |handle: RpcEngineHandle| {
+        let cwd = cwd.clone();
+        let agent_dir = agent_dir.clone();
+        async move {
+            let engine = Arc::clone(&handle.engine);
+            let writer = LineWriter::spawn();
+            Arc::new(crate::rpc::commands::RpcState {
+                session: Arc::new(RpcSession::adopt(handle, None, writer.clone()).await),
+                writer,
+                cwd,
+                agent_dir,
+                compacting: Arc::default(),
+                autonomous: Arc::new(tokio::sync::Mutex::new(
+                    pa_core::autonomous::create_autonomous_runtime_state(None, None),
+                )),
+                last_goal: Arc::new(tokio::sync::Mutex::new(engine.goal_state().await)),
+                queue_pump: Arc::default(),
+                pump_suspended: Arc::default(),
+                model_ops: Arc::default(),
+                session_ops: Arc::default(),
+            })
+        }
+    };
+    let refine = |state: Arc<crate::rpc::commands::RpcState>| async move {
+        crate::rpc::commands::handle_command(
+            &state,
+            crate::rpc::protocol::RpcCommand {
+                id: None,
+                command: "refine".to_string(),
+                payload: serde_json::json!({ "global": true }),
+            },
+        )
+        .await
+    };
+    let memories = |workspace: &str| {
+        let dir =
+            pa_core::refinement::get_workspace_harness_state_dir(&agent_dir, workspace).unwrap();
+        let state = pa_core::refinement::load_harness_state(
+            &dir,
+            pa_core::refinement::HarnessScope::Global,
+        );
+        let mut ids: Vec<String> = state.entries[&pa_core::refinement::RefinementKind::Memory]
+            .keys()
+            .cloned()
+            .collect();
+        ids.sort();
+        ids
+    };
+    let session_handle = || async {
+        let mut handle =
+            engine_handle(&cwd, &agent_dir, SessionManager::in_memory(&cwd), None).await;
+        handle.model.api = WORKSPACE_PLANNER_API.to_string();
+        handle.model.context_window = 128_000;
+        handle
+    };
+
+    pa_types::workspace::write_active_workspace(&agent_dir, Some("alpha")).unwrap();
+    let first = rpc_state(session_handle().await).await;
+    let refined = refine(Arc::clone(&first)).await;
+    assert_eq!(refined["success"], true, "{refined}");
+
+    // Another session switches the default; this session stays pinned to alpha.
+    pa_types::workspace::write_active_workspace(&agent_dir, Some("beta")).unwrap();
+    let refined = refine(Arc::clone(&first)).await;
+    assert_eq!(refined["success"], true, "{refined}");
+    assert_eq!(memories("alpha"), vec!["lesson-0", "lesson-1"]);
+    assert_eq!(memories("beta"), Vec::<String>::new());
+
+    let second = rpc_state(session_handle().await).await;
+    let refined = refine(second).await;
+    assert_eq!(refined["success"], true, "{refined}");
+    assert_eq!(memories("beta"), vec!["lesson-2"]);
+    assert!(!pa_core::refinement::get_harness_state_path(
+        &pa_core::refinement::get_global_harness_state_dir(&agent_dir)
+    )
+    .exists());
+    pa_ai::registry::unregister_api_providers(WORKSPACE_PLANNER_API);
+}

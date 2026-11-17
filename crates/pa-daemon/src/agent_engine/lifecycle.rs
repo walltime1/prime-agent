@@ -1066,6 +1066,7 @@ impl AgentSessionEngine {
             .expect("late agent message sink lock")
             .clone();
         pa_core::session_engine::engine::create_session(SessionEngineConfig {
+            workspace_selection: pa_core::session_engine::engine::WorkspaceSelection::Inherit,
             on_late_sent_agent_message,
             semantic_edges,
             telemetry,

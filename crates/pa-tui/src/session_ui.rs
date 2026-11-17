@@ -54,7 +54,7 @@ use stream::LoaderTokenTracker;
 use stream::SpeedStats;
 
 use std::collections::{BTreeMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use pa_types::daemon::{CycleDirection, DaemonCommand};
@@ -134,8 +134,15 @@ pub(crate) fn attach_capabilities() -> Vec<pa_types::daemon::DaemonClientCapabil
     ]
 }
 
-/// The active workspace shown in the top bar; `None` when no agent dir resolves or none is set.
-pub(crate) fn active_workspace_name() -> Option<String> {
+/// The workspace a session runs in, for the top bar: its own record when it has one (an explicit
+/// global record is `None`), else the default pointer that seeds sessions without one.
+pub(crate) fn active_workspace_name(session_file: Option<&str>) -> Option<String> {
+    let recorded = session_file
+        .and_then(|file| pa_types::workspace::session_artifact_dir_for_log(Path::new(file)))
+        .and_then(|dir| pa_types::workspace::read_session_workspace_record(&dir));
+    if let Some(workspace) = recorded {
+        return workspace;
+    }
     let agent_dir = pa_types::platform::agent_dir()?;
     pa_types::workspace::read_active_workspace(&agent_dir)
 }
@@ -344,7 +351,7 @@ pub(crate) struct SessionUi {
     subagent_counts: crate::subagents::SubagentCounts,
     /// This session's persisted file path (family identity of the
     /// subagent linkage; `None` for unpersisted sessions).
-    session_file: Option<String>,
+    pub(crate) session_file: Option<String>,
     pub(crate) pending_selection: Option<SessionSelection>,
     pub(crate) pending_selection_rlm_depth: Option<u32>,
     pub(crate) pending_selection_origin: Option<crate::interactive::SelectionOrigin>,

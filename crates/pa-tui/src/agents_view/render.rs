@@ -43,32 +43,22 @@ impl AgentsViewMode {
         )];
         if let Some(root) = &self.scope_root {
             extra_metadata.push(("depth".to_string(), root.child_depth.to_string()));
-        } else if let Some(agent_dir) = pa_types::platform::agent_dir() {
-            let active = pa_types::workspace::read_active_workspace(&agent_dir);
-            let workspaces = pa_types::workspace::list_workspaces(&agent_dir);
-            let summary = if workspaces.is_empty() {
-                active
-                    .as_deref()
-                    .map_or_else(|| "none (global)".to_string(), |name| format!("{name} (active)"))
+        } else {
+            // Derived from the daemon summaries already in the rows: the splash
+            // renders every frame, so it never touches the disk.
+            let summary = if self.workspace_choices.is_empty() {
+                "none (global)".to_string()
             } else {
-                workspaces
-                    .into_iter()
-                    .map(|name| {
-                        if active.as_deref() == Some(name.as_str()) {
-                            format!("{name} (active)")
-                        } else {
-                            name
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                self.workspace_choices.join(", ")
             };
-            let filter_suffix = if self.workspace_filter {
-                " · filtered (ctrl+f)"
-            } else {
-                ""
+            let filter_suffix = match &self.workspace_filter {
+                Some(name) => format!(" · filtered: {name} (ctrl+f)"),
+                None => String::new(),
             };
-            extra_metadata.push(("workspaces".to_string(), format!("{summary}{filter_suffix}")));
+            extra_metadata.push((
+                "workspaces".to_string(),
+                format!("{summary}{filter_suffix}"),
+            ));
         }
         let theme = &self.theme;
         let chrome = crate::chrome::ChromeState {

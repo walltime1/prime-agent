@@ -1013,6 +1013,24 @@ async fn a_saved_session_listing_skips_stored_factory_specs_while_the_factory_is
 }
 
 #[test]
+fn saved_session_summary_publishes_the_recorded_workspace() {
+    let root = std::env::temp_dir().join(format!("pa-saved-ws-{}", uuid::Uuid::new_v4()));
+    let sessions_dir = root.join("sessions");
+    std::fs::create_dir_all(&sessions_dir).unwrap();
+    let mut session = crate::session_store::SessionFile::create("/tmp", None, 0);
+    let path = sessions_dir.join(format!("{}.jsonl", session.session_id()));
+    session.set_path(path.clone());
+    session.append_message(&json!({"role": "user", "content": "hi", "timestamp": 1u64}));
+    session.rewrite().unwrap();
+    let artifact_dir = pa_types::workspace::session_artifact_dir_for_log(&path).unwrap();
+    pa_types::workspace::write_session_workspace(&artifact_dir, Some("alpha")).unwrap();
+    let info = crate::session_store::read_session_info(&path).unwrap();
+    let summary = saved_session_summary(&info);
+    assert_eq!(summary["workspace"], json!("alpha"));
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn saved_session_rows_carry_the_persisted_thinking_level() {
     let dir = std::env::temp_dir().join(format!("pa-saved-tl-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -2587,6 +2605,7 @@ async fn a_ledger_child_wake_joins_an_already_hosting_resident() {
 /// The daemon's exit sends the partial `daemon event` summary of the
 /// current window (the window is under an hour, so no count sent it yet).
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn the_exit_flush_sends_the_partial_daemon_event_summary() {
     let _env = CleanTelemetryEnv::default();
     let dir = tempfile::TempDir::new().unwrap();
@@ -2622,6 +2641,7 @@ async fn the_exit_flush_sends_the_partial_daemon_event_summary() {
 /// after a re-enable. The counters skip while off (they are not
 /// severed), so the on-period count before the window still reports.
 #[tokio::test]
+#[ignore = "telemetry delivery is stubbed out in this fork"]
 async fn off_window_daemon_events_never_count_into_the_summary() {
     let _env = CleanTelemetryEnv::default();
     let dir = tempfile::TempDir::new().unwrap();

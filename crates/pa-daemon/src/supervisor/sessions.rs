@@ -825,6 +825,9 @@ pub(super) fn saved_session_summary(info: &crate::session_store::SessionInfo) ->
         "firstMessage": info.first_message,
         "rlmDepth": info.rlm_depth,
     });
+    if let Some(workspace) = pa_types::workspace::read_session_workspace_for_log(&info.path) {
+        row["workspace"] = json!(workspace);
+    }
     // TS `summaryForInactiveSession` publishes the header binding: the
     // parent path only when one is recorded (TS's `undefined` is omitted).
     if let Some(parent) = &info.parent_session_path {

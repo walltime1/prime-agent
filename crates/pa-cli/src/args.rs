@@ -427,9 +427,9 @@ pub fn parse_args(args: &[String]) -> Args {
                 if pa_types::workspace::validate_workspace_name(&value).is_err()
                     && !matches!(value.trim(), "off" | "clear" | "global" | "none")
                 {
-                    result
-                        .diagnostics
-                        .push(Diagnostic::error(format!("invalid --workspace name: {value:?}")));
+                    result.diagnostics.push(Diagnostic::error(format!(
+                        "invalid --workspace name: {value:?}"
+                    )));
                 } else {
                     result.workspace = Some(value);
                 }

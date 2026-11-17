@@ -366,7 +366,10 @@ struct AgentsViewMode {
     rows: Vec<AgentsViewRow>,
     selected: usize,
     query: String,
-    workspace_filter: bool,
+    /// The ctrl+f workspace filter; `None` shows every workspace.
+    workspace_filter: Option<String>,
+    /// Workspaces of the last built agent rows (sorted, global last): the ctrl+f cycle order.
+    workspace_choices: Vec<String>,
     /// The status line: rendered at the bottom hint row in its tone, expired by the
     /// loop's deadline arm, sticky lines cleared by the next key.
     status: Option<Status>,
@@ -557,7 +560,8 @@ impl AgentsViewMode {
             scope_root: None,
             scope_active: false,
             scope_dropped: false,
-            workspace_filter: false,
+            workspace_filter: None,
+            workspace_choices: Vec::new(),
             expanded_parents: std::collections::HashSet::default(),
             program_shown_parents: std::collections::HashSet::default(),
             pending_ancestors,

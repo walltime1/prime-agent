@@ -503,7 +503,7 @@ async fn refine(state: &Arc<RpcState>, payload: &Value) -> Result<ResponseData, 
     let model = handle.model.clone();
     let api_key = handle.api_key.clone();
     let engine = handle.engine.clone();
-    let global_harness_dir = pa_core::refinement::get_active_harness_state_dir(&state.agent_dir);
+    let global_harness_dir = engine.harness_write_dir.clone();
     // Register the job against this session, then release the lease before
     // waiting. Other prompts and session replacement must not await planning.
     let pending = engine.session.start_refinement(

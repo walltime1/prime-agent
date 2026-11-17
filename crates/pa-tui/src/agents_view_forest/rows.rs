@@ -133,18 +133,8 @@ pub(crate) fn build_rows<S: std::hash::BuildHasher + Default>(
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|ws| !ws.is_empty())
-            .map(str::to_string)
-            .or_else(|| {
-                summary
-                    .get("sessionFile")
-                    .and_then(Value::as_str)
-                    .and_then(|path| {
-                        pa_types::workspace::read_session_workspace_for_log(
-                            std::path::Path::new(path),
-                        )
-                    })
-            })
-            .unwrap_or_else(|| "global".to_string());
+            .unwrap_or("global")
+            .to_string();
         base.push(BaseRow {
             kind,
             section: record.section,

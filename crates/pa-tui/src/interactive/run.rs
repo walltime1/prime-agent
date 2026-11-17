@@ -694,6 +694,23 @@ async fn run_interactive_surface(
     // open path does not block on a stats fetch.
     session.spawn_model_catalog_refresh();
     session.rebuild_view(&mut view, &crate::session_ui::RebuildKind::Rebind);
+    // `--workspace` retargets the attached session when it runs elsewhere:
+    // the same record write + reload as `/workspace <name>` (resumed and
+    // already-running sessions keep their own record otherwise).
+    let startup_workspace = super::STARTUP_WORKSPACE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    if let Some(startup_workspace) = startup_workspace.as_deref() {
+        let target = (startup_workspace != "global").then_some(startup_workspace);
+        let session_file = session.session_file.as_deref();
+        let current = crate::session_ui::active_workspace_name(session_file);
+        if current.as_deref() != target
+            && session.write_session_workspace_record(target, "Workspace switch failed", &mut view)
+        {
+            session.handle_reload_command(&mut view)?;
+        }
+    }
     // The cross-view layout handoff's adopt (view::handoff): a re-entry whose attach cursor exactly
     // matches the previous run's held handoff holds its visible-window packs for the first draw;
     // any chat mutation retires it. A cursor-less re-attach never adopts.

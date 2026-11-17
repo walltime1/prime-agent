@@ -9,6 +9,7 @@ use serde_json::Value;
 fn empty_state_digest_renders_placeholder() {
     let tmp = tempfile::tempdir().unwrap();
     let context = HarnessDigestContext {
+        workspace_dir: None,
         global_dir: tmp.path().join("harness"),
         local_dir: None,
         include_ipython: true,
@@ -327,6 +328,7 @@ async fn placement_rig(
         std::sync::Arc::new(tokio::sync::Mutex::new(session)),
         Vec::new(),
         Some(HarnessDigestContext {
+            workspace_dir: None,
             global_dir,
             local_dir: Some(local_dir),
             include_ipython: false,
@@ -563,4 +565,67 @@ fn appended_digest_wins_when_refreshes_share_a_timestamp() {
         expected,
         "converted live rows must recover the newest fingerprint even when the rendered text ties"
     );
+}
+
+#[test]
+fn workspace_entries_layer_over_global_in_the_digest() {
+    use crate::refinement::{
+        empty_harness_state, save_harness_state, HarnessEntry, HarnessScope, RefinementKind,
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let memory = |id: &str, content: &str| HarnessEntry {
+        id: id.to_string(),
+        kind: RefinementKind::Memory,
+        title: format!("Entry {id}"),
+        content: content.to_string(),
+        path: format!("/h/{id}"),
+        scope: Some(HarnessScope::Global),
+        reference: serde_json::Map::default(),
+        arguments: serde_json::Map::default(),
+        metadata: serde_json::Map::default(),
+        source: "test".to_string(),
+        created_at: "2026-01-01T00:00:00.000Z".to_string(),
+        updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+        version: 1,
+    };
+    let store = |dir: &std::path::Path, entries: &[HarnessEntry]| {
+        let mut state = empty_harness_state();
+        for entry in entries {
+            state
+                .entries
+                .get_mut(&RefinementKind::Memory)
+                .unwrap()
+                .insert(entry.id.clone(), entry.clone());
+        }
+        save_harness_state(dir, &state).unwrap();
+    };
+    let global_dir = tmp.path().join("harness");
+    let workspace_dir = tmp.path().join("workspaces").join("alpha").join("harness");
+    store(
+        &global_dir,
+        &[
+            memory("only-global", "global preference survives"),
+            memory("shared", "global version of shared"),
+        ],
+    );
+    store(
+        &workspace_dir,
+        &[
+            memory("only-workspace", "workspace lesson"),
+            memory("shared", "workspace version of shared"),
+        ],
+    );
+    let context = HarnessDigestContext {
+        global_dir,
+        workspace_dir: Some(workspace_dir),
+        local_dir: None,
+        include_ipython: false,
+        include_shell_examples: false,
+        include_refine: false,
+    };
+    let digest = harness_digest_text(&context, HarnessQueryTerms::default());
+    assert!(digest.contains("global preference survives"), "{digest}");
+    assert!(digest.contains("workspace lesson"), "{digest}");
+    assert!(digest.contains("workspace version of shared"), "{digest}");
+    assert!(!digest.contains("global version of shared"), "{digest}");
 }

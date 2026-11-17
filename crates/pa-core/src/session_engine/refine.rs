@@ -464,14 +464,52 @@ pub(crate) async fn prepare_refinement(
             "Local harness refinement requires a session directory; use global refinement instead."
         );
     }
-    // Planning state: global, or merged global+local for local refinements.
+    // Planning state: the non-local write store (global, or the session's
+    // workspace), merged with local for local refinements. A workspace session
+    // also sees the shared global store as read-only context.
     let global_state = load_harness_state(global_harness_dir, HarnessScope::Global);
-    let planning_state = if requested_scope == HarnessScope::Global {
-        global_state.clone()
-    } else {
-        let local_state = load_harness_state(&local_harness_dir, HarnessScope::Local);
-        merge_harness_states(&global_state, Some(&local_state))
+    let workspace = agent_dir.and_then(|dir| {
+        crate::refinement::workspace_for_harness_dir(dir, global_harness_dir)
+            .map(|name| (dir, name))
+    });
+    let shared_global = workspace.as_ref().map(|(dir, _)| {
+        load_harness_state(
+            &crate::refinement::get_global_harness_state_dir(dir),
+            HarnessScope::Global,
+        )
+    });
+    let planning_state = match (requested_scope, shared_global) {
+        (HarnessScope::Global, None) => global_state.clone(),
+        (HarnessScope::Global, Some(mut shared)) => {
+            for entries in shared.entries.values_mut() {
+                for entry in entries.values_mut() {
+                    entry.title = format!("(read-only global) {}", entry.title);
+                }
+            }
+            shared.refinements.clear();
+            crate::refinement::layer_harness_states(shared, global_state.clone())
+        }
+        (HarnessScope::Local, shared) => {
+            let non_local = match shared {
+                Some(shared) => {
+                    crate::refinement::layer_harness_states(shared, global_state.clone())
+                }
+                None => global_state.clone(),
+            };
+            let local_state = load_harness_state(&local_harness_dir, HarnessScope::Local);
+            merge_harness_states(&non_local, Some(&local_state))
+        }
     };
+    let mut core_options = core_options;
+    if let (HarnessScope::Global, Some((_, name))) = (requested_scope, &workspace) {
+        let note = format!(
+            "This refinement writes to workspace '{name}'. Entries titled \"(read-only global)\" belong to the shared global store and cannot be edited here; to change one for this workspace, create a workspace entry with the same id, which overrides it."
+        );
+        core_options.instructions = Some(match core_options.instructions.take() {
+            Some(existing) => format!("{existing}\n\n{note}"),
+            None => note,
+        });
+    }
     let global = load_global_refinement_history(global_harness_dir);
     let history = crate::refinement::merge_refinement_history(&global, refinement_history);
     // Baseline captured before the (slow) LLM pass, so concurrent kernel
@@ -1724,7 +1762,11 @@ Reviewer instructions: record it"
         );
     }
 
-    async fn run_global_refine(dir: &TempDir, agent_dir: &Path, entry_id: &str) -> RefinementResult {
+    async fn run_global_refine(
+        dir: &TempDir,
+        agent_dir: &Path,
+        entry_id: &str,
+    ) -> RefinementResult {
         let session = tokio::sync::Mutex::new(persisted_session(dir));
         let agent = Arc::new(Agent::new(AgentOptions::default()));
         let global_dir = crate::refinement::get_active_harness_state_dir(agent_dir);
@@ -1786,7 +1828,7 @@ Reviewer instructions: record it"
         let workspace_dir =
             crate::refinement::get_workspace_harness_state_dir(&agent_dir, "proj-a").unwrap();
         assert!(has_memory(&workspace_dir, "w1"));
-        assert!(load_global_refinement_history(&workspace_dir).len() == 1);
+        assert_eq!(load_global_refinement_history(&workspace_dir).len(), 1);
         let global_dir = crate::refinement::get_global_harness_state_dir(&agent_dir);
         assert!(!crate::refinement::get_harness_state_path(&global_dir).exists());
         let outcome = create_refinement_outcome_message(&result);
@@ -1819,5 +1861,46 @@ Reviewer instructions: record it"
         let active = crate::refinement::get_active_harness_state_dir(&agent_dir);
         assert!(!has_memory(&active, "a1"));
         assert!(!has_memory(&active, "b1"));
+    }
+
+    #[tokio::test]
+    async fn workspace_refine_sees_global_entries_as_read_only_context() {
+        let dir = TempDir::new().unwrap();
+        let agent_dir = dir.path().join("agent");
+        crate::refinement::write_active_workspace(&agent_dir, None).unwrap();
+        run_global_refine(&dir, &agent_dir, "shared-pref").await;
+        crate::refinement::write_active_workspace(&agent_dir, Some("proj-a")).unwrap();
+
+        let prompt = Arc::new(std::sync::Mutex::new(String::new()));
+        let captured = Arc::clone(&prompt);
+        let reply = r#"{"summary":"lesson","edits":[]}"#.to_string();
+        let refiner: RefinerFn = Box::new(move |_model, _system, user_prompt| {
+            *captured.lock().unwrap() = user_prompt;
+            Box::pin(async move { Ok(text_assistant(&reply)) })
+        });
+        let session = tokio::sync::Mutex::new(persisted_session(&dir));
+        let agent = Arc::new(Agent::new(AgentOptions::default()));
+        execute_refinement(
+            &session,
+            &agent,
+            RefinementTranscript {
+                messages: &[user_message("x")],
+                refinement_history: &[],
+            },
+            &crate::refinement::get_active_harness_state_dir(&agent_dir),
+            &test_model(),
+            &RefineOptions {
+                global: true,
+                ..Default::default()
+            },
+            RefinementSource::User,
+            refiner,
+            Some(&agent_dir),
+        )
+        .await
+        .unwrap();
+        let prompt = prompt.lock().unwrap().clone();
+        assert!(prompt.contains("(read-only global) Lesson"), "{prompt}");
+        assert!(prompt.contains("writes to workspace 'proj-a'"), "{prompt}");
     }
 }

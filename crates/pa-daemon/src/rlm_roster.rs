@@ -205,6 +205,9 @@ pub fn passive_child_summary(child: &PassiveRlmChild) -> Value {
     if let Some(spawn_code) = &metadata.spawn_code {
         object.insert("spawnCode".to_string(), json!(spawn_code));
     }
+    if let Some(workspace) = pa_types::workspace::read_session_workspace_for_log(&info.path) {
+        object.insert("workspace".to_string(), json!(workspace));
+    }
     // The persisted thinking level rides the passive-child row: the
     // agents-view Model column keeps rendering "model:level" for
     // passivated subagents.

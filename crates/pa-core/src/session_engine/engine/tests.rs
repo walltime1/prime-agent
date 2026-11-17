@@ -103,6 +103,7 @@ async fn engine_runs_tool_loop_and_persists() {
         inner_stream(model, context, options)
     });
     let engine = create_session(SessionEngineConfig {
+        workspace_selection: WorkspaceSelection::Inherit,
         on_late_sent_agent_message: None,
         semantic_edges: None,
         cron_store: None,
@@ -214,6 +215,7 @@ async fn spawned_child_prompt_stamps_its_depth() {
     let cwd = tmp.path().join("project");
     std::fs::create_dir_all(&cwd).unwrap();
     let engine = create_session(SessionEngineConfig {
+        workspace_selection: WorkspaceSelection::Inherit,
         on_late_sent_agent_message: None,
         semantic_edges: None,
         cron_store: None,
@@ -288,6 +290,7 @@ async fn oauth_creds_unlock_generic_mcp_gating_in_new_sessions() {
         stream_fn: pa_agent::stream::StreamFn,
     ) -> SessionEngineConfig {
         SessionEngineConfig {
+            workspace_selection: WorkspaceSelection::Inherit,
             on_late_sent_agent_message: None,
             semantic_edges: None,
             cron_store: None,
@@ -479,6 +482,7 @@ async fn create_session_appends_missing_resume_settings_rows() {
         ))
         .unwrap();
     let engine = create_session(SessionEngineConfig {
+        workspace_selection: WorkspaceSelection::Inherit,
         on_late_sent_agent_message: None,
         semantic_edges: None,
         cron_store: None,
@@ -863,6 +867,7 @@ async fn late_receipts_recorded_before_the_row_lands_apply_on_landing() {
         }),
     };
     let engine = create_session(SessionEngineConfig {
+        workspace_selection: WorkspaceSelection::Inherit,
         on_late_sent_agent_message: None,
         semantic_edges: None,
         cron_store: None,
@@ -961,5 +966,49 @@ async fn late_receipts_recorded_before_the_row_lands_apply_on_landing() {
                     == crate::session_engine::late_sent_messages::IPYTHON_SENT_AGENT_MESSAGE_CUSTOM_TYPE
         )),
         "the receipt persists as a custom entry"
+    );
+}
+
+#[tokio::test]
+async fn workspace_selection_repins_a_session_recorded_in_another_workspace() {
+    let model = pa_agent::types::Model {
+        id: "m".into(),
+        name: "m".into(),
+        api: "test".into(),
+        provider: "test".into(),
+        base_url: "http://localhost".into(),
+        reasoning: false,
+        cost: pa_agent::types::UsageCost::default(),
+        context_window: 1_000,
+        max_tokens: 100,
+        max_tokens_explicit: false,
+    };
+    let provider = Arc::new(ScriptedProvider::new(model.clone()));
+    let tmp = tempfile::tempdir().unwrap();
+    let cwd = tmp.path().join("project");
+    let agent_dir = tmp.path().join("agent");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let log = tmp.path().join("sessions").join("session.jsonl");
+    let artifact_dir = pa_types::workspace::session_artifact_dir_for_log(&log).unwrap();
+    pa_types::workspace::write_session_workspace(&artifact_dir, Some("alpha")).unwrap();
+    let engine = create_session(SessionEngineConfig {
+        cwd,
+        agent_dir: agent_dir.clone(),
+        model: Some(model),
+        stream_fn: Some(provider.stream_fn()),
+        conversation_log_path: Some(log),
+        daemonless: true,
+        workspace_selection: WorkspaceSelection::Named("beta".into()),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        engine.harness_write_dir,
+        agent_dir.join("workspaces/beta/harness")
+    );
+    assert_eq!(
+        pa_types::workspace::read_session_workspace(&artifact_dir),
+        Some("beta".to_string())
     );
 }

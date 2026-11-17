@@ -359,6 +359,10 @@ const TOP_LEVEL_OPTION_GROUPS: &[OptionGroup] = &[
                 "Fork a saved session into a new session",
             ),
             ("--session-dir <dir>", "Use a custom session directory"),
+            (
+                "--workspace <name>",
+                "Run in a continual-harness workspace (\"global\" for none)",
+            ),
             ("--no-session", "Do not save the session"),
             (
                 "--goal <objective>",
@@ -629,5 +633,10 @@ mod tests {
         assert!(!is_help_command_request(&["bogus"]));
         assert!(is_help_command_request(&[]));
         assert!(is_help_command_request(&["daemon"]));
+    }
+
+    #[test]
+    fn top_level_help_lists_the_workspace_flag() {
+        assert!(format_top_level_help().contains("--workspace <name>"));
     }
 }

@@ -354,7 +354,7 @@ fn resolve_path(path: &Path) -> PathBuf {
 }
 
 /// An absolute parent as-is, else relative to the session file's directory.
-fn resolve_parent_session_path(session_file: &Path, parent_session: &str) -> PathBuf {
+pub(crate) fn resolve_parent_session_path(session_file: &Path, parent_session: &str) -> PathBuf {
     if Path::new(parent_session).is_absolute() {
         PathBuf::from(parent_session)
     } else {

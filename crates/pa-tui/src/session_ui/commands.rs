@@ -6,6 +6,7 @@ use super::{
     PendingConfirm, RebuildKind, Result, SessionUi, SlashCommandExecution, SlashCommandRegistry,
     StatusKind, SubmitBehavior, Value, UI_REQUEST_TIMEOUT_MS,
 };
+use std::path::Path;
 
 impl SessionUi {
     /// Slash-command dispatch: builtin client commands without a UI report unavailability, session
@@ -832,9 +833,12 @@ impl SessionUi {
                 };
                 let arg = resolved.args.trim();
                 if arg.is_empty() || arg == "list" {
-                    let active = pa_types::workspace::read_active_workspace(&agent_dir);
+                    let session_file = self.session_file.as_deref();
+                    let active = crate::session_ui::active_workspace_name(session_file);
+                    let default_workspace = pa_types::workspace::read_active_workspace(&agent_dir);
                     let workspaces = pa_types::workspace::list_workspaces(&agent_dir);
                     let active_line = active.as_deref().unwrap_or("none (global)");
+                    let default_line = default_workspace.as_deref().unwrap_or("none (global)");
                     let list_line = if workspaces.is_empty() {
                         "none".to_string()
                     } else {
@@ -842,7 +846,7 @@ impl SessionUi {
                     };
                     self.note(
                         &format!(
-                            "Active workspace: {active_line}\nAvailable workspaces: {list_line}\nUsage: /workspace <name> | /workspace off"
+                            "Active workspace: {active_line}\nDefault for new sessions: {default_line}\nAvailable workspaces: {list_line}\nUsage: /workspace <name> | off | list | delete <name> | rename <old> <new>"
                         ),
                         view,
                     );
@@ -850,7 +854,7 @@ impl SessionUi {
                 }
                 if self.turn_active || view.working.is_some() || self.work_in_flight() {
                     self.note_as(
-                        "Wait for the current response to finish before switching workspaces.",
+                        "Wait for the current response to finish before changing workspaces.",
                         StatusKind::Warning,
                         view,
                     );
@@ -858,17 +862,69 @@ impl SessionUi {
                 }
                 if view.compaction.is_some() {
                     self.note_as(
-                        "Wait for compaction to finish before switching workspaces.",
+                        "Wait for compaction to finish before changing workspaces.",
                         StatusKind::Warning,
                         view,
                     );
                     return Ok(());
                 }
-                let target = if matches!(arg, "off" | "clear" | "global" | "none") {
+                let words: Vec<&str> = arg.split_whitespace().collect();
+                match words.as_slice() {
+                    ["delete", name] => {
+                        match pa_types::workspace::delete_workspace(&agent_dir, name) {
+                            Ok(()) => self.note(&format!("Deleted workspace {name}."), view),
+                            Err(err) => {
+                                self.error_row(&format!("Workspace delete failed: {err}"), view);
+                            }
+                        }
+                        return Ok(());
+                    }
+                    ["rename", from, to] => {
+                        let renames_session_workspace =
+                            crate::session_ui::active_workspace_name(self.session_file.as_deref())
+                                .is_some_and(|current| {
+                                    pa_types::workspace::validate_workspace_name(from)
+                                        .is_ok_and(|valid| valid == current)
+                                });
+                        if let Err(err) =
+                            pa_types::workspace::rename_workspace(&agent_dir, from, to)
+                        {
+                            self.error_row(&format!("Workspace rename failed: {err}"), view);
+                            return Ok(());
+                        }
+                        self.note(&format!("Renamed workspace {from} to {to}."), view);
+                        if renames_session_workspace {
+                            if !self.write_session_workspace_record(
+                                Some(*to),
+                                "Workspace rename failed",
+                                view,
+                            ) {
+                                return Ok(());
+                            }
+                            self.handle_reload_command(view)?;
+                        }
+                        return Ok(());
+                    }
+                    ["delete" | "rename", ..] => {
+                        self.error_row(
+                            "Usage: /workspace delete <name> | rename <old> <new>",
+                            view,
+                        );
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+                let target = if matches!(
+                    arg.to_ascii_lowercase().as_str(),
+                    "off" | "clear" | "global" | "none"
+                ) {
                     None
                 } else {
                     Some(arg)
                 };
+                if !self.write_session_workspace_record(target, "Workspace switch failed", view) {
+                    return Ok(());
+                }
                 if let Err(err) = pa_types::workspace::write_active_workspace(&agent_dir, target) {
                     self.error_row(&format!("Workspace switch failed: {err}"), view);
                     return Ok(());
@@ -896,6 +952,31 @@ impl SessionUi {
             }
         }
         Ok(())
+    }
+
+    /// Record `workspace` (`None` for global) as the current session's workspace. A session
+    /// without a log has nothing to record. Returns `false` after showing `failure` when the
+    /// record cannot be written.
+    pub(crate) fn write_session_workspace_record(
+        &mut self,
+        workspace: Option<&str>,
+        failure: &str,
+        view: &mut AgentView,
+    ) -> bool {
+        let Some(session_file) = self.session_file.as_deref() else {
+            return true;
+        };
+        let Some(artifact_dir) =
+            pa_types::workspace::session_artifact_dir_for_log(Path::new(session_file))
+        else {
+            self.error_row("Cannot resolve session artifact directory.", view);
+            return false;
+        };
+        if let Err(err) = pa_types::workspace::write_session_workspace(&artifact_dir, workspace) {
+            self.error_row(&format!("{failure}: {err}"), view);
+            return false;
+        }
+        true
     }
 
     /// Rename the active session through the daemon's `SetSessionName` seam —

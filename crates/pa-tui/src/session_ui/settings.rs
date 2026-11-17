@@ -796,7 +796,7 @@ impl SessionUi {
 
     /// The reload box replaces the editor while the daemon reload runs; the
     /// run loop folds the outcome in when it lands.
-    pub(super) fn handle_reload_command(&mut self, view: &mut AgentView) -> Result<()> {
+    pub(crate) fn handle_reload_command(&mut self, view: &mut AgentView) -> Result<()> {
         view.reload_box = Some("Reloading keybindings, skills, prompts, themes...".to_string());
         self.dirty = true;
         let client = self.client.clone();
@@ -829,7 +829,8 @@ impl SessionUi {
                 // drop exactly like the TS re-mount.
                 self.rebuild_transcript(view).await;
                 // `/workspace` reloads right after writing the selection, so the top bar follows it here.
-                view.chrome.workspace = crate::session_ui::active_workspace_name();
+                let session_file = self.session_file.as_deref();
+                view.chrome.workspace = crate::session_ui::active_workspace_name(session_file);
                 // The Rust editor consumes the keybinding set, so the reloaded manager
                 // replaces it.
                 let mut keybindings = view.editor.keybindings().clone();

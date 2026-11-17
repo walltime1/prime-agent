@@ -658,8 +658,7 @@ pub fn build_layout(rows: &[crate::agents_view_forest::AgentsViewRow], width: us
         .map(|row| str_width(&row.workspace))
         .max()
         .unwrap_or(0)
-        .max(9)
-        .min(16);
+        .clamp(9, 16);
     let workspace_width = if width >= details_width + desired_workspace + 24 {
         desired_workspace
     } else {

@@ -837,8 +837,11 @@ fn splash_renders_logo_version_model_and_cwd() {
     assert!(lines.iter().any(|l| text(l).contains("model faux-1")));
     assert!(lines.iter().any(|l| text(l).contains("cwd /tmp/project")));
     assert!(lines.iter().any(|l| text(l).contains("██ █   ▌▗▀ █ ██")));
-    assert!(lines.iter().flatten().any(|span| span.content.contains("▄▄▄▄▄▄▖")
-        && span.style.fg != theme().fg_style(ThemeColor::Text).fg));
+    assert!(lines
+        .iter()
+        .flatten()
+        .any(|span| span.content.contains("▄▄▄▄▄▄▖")
+            && span.style.fg != theme().fg_style(ThemeColor::Text).fg));
 }
 
 #[test]

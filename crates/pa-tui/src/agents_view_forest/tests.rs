@@ -1522,3 +1522,26 @@ fn the_factory_line_counts_paused_runs_apart_from_running_ones() {
     );
     assert_eq!(line(1, 0), vec!["\u{2699} 0 factories \u{b7} 1 running"]);
 }
+
+#[test]
+fn a_row_takes_its_workspace_from_the_summary_never_the_session_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("sessions").join("recorded.jsonl");
+    let artifact_dir = pa_types::workspace::session_artifact_dir_for_log(&log).unwrap();
+    pa_types::workspace::write_session_workspace(&artifact_dir, Some("alpha")).unwrap();
+    let mut tagged = parent_summary("tagged");
+    tagged["workspace"] = json!("alpha");
+    let mut recorded_on_disk = parent_summary("recorded");
+    recorded_on_disk["sessionFile"] = json!(log.to_string_lossy());
+    let rows = rows_for(
+        &[
+            roster_entry("t", "idle", &tagged),
+            roster_entry("r", "idle", &recorded_on_disk),
+        ],
+        None,
+        &[],
+    );
+    let mut workspaces: Vec<&str> = rows.iter().map(|row| row.workspace.as_str()).collect();
+    workspaces.sort_unstable();
+    assert_eq!(workspaces, ["alpha", "global"]);
+}

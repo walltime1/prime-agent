@@ -364,7 +364,7 @@ impl SeededRosterEntry {
             .parent()
             .map(|dir| dir.to_string_lossy().to_string())
             .unwrap_or_default();
-        let summary = json!({
+        let mut summary = json!({
             "id": persisted_session_id,
             "lifecycle": "live",
             "activity": "idle",
@@ -382,6 +382,9 @@ impl SeededRosterEntry {
             "parentSessionPath": edge.parent,
             "rlmChildId": edge.child_id,
         });
+        if let Some(workspace) = pa_types::workspace::read_session_workspace_for_log(child) {
+            summary["workspace"] = json!(workspace);
+        }
         Self {
             agent_id: roster_agent_id_for_summary(&summary),
             child_file: canonical_session_path(child).to_string_lossy().to_string(),

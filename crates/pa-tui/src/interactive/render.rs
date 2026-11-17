@@ -3,7 +3,7 @@
 
 use super::{
     mpsc, terminal, AgentView, Duration, ExitGuard, HeadlessStep, InteractiveOptions, KeyEvent,
-    Result, SessionUi, Terminal, UiInput, UiMode,
+    Result, SessionSelection, SessionUi, Terminal, UiInput, UiMode,
 };
 
 /// One typed string as key events: characters become `Char` presses, `\n`
@@ -33,7 +33,14 @@ pub(super) fn apply_startup_chrome(view: &mut AgentView, options: &InteractiveOp
     view.chrome.version.clone_from(&options.version);
     view.chrome.cwd = options.cwd.to_string_lossy().to_string();
     view.chrome.chat_name = crate::chrome::display_name(&view.chrome.cwd);
-    view.chrome.workspace = crate::session_ui::active_workspace_name();
+    // Only a resume names its session file before attach; other selections show the default.
+    let session_file = match &options.session {
+        SessionSelection::Resume(path) => path.to_str(),
+        SessionSelection::New | SessionSelection::NewChild { .. } | SessionSelection::Attach(_) => {
+            None
+        }
+    };
+    view.chrome.workspace = crate::session_ui::active_workspace_name(session_file);
     view.chrome.show_manage = !options.no_session;
     view.chrome.tray_depth = options.session_rlm_depth;
     view.chrome.activity = Some(crate::chrome::ActivityDock::default());

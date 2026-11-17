@@ -303,6 +303,17 @@ pub trait InteractionTelemetry: Send + Sync {
     fn live_tool_timer_started(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 }
 
+/// The `--workspace` choice for the first session this process attaches (a
+/// workspace name, or `global`), taken once so later opens keep their own.
+static STARTUP_WORKSPACE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Hand the `--workspace` choice to the first attach of this process.
+pub fn set_startup_workspace(workspace: Option<String>) {
+    *STARTUP_WORKSPACE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = workspace;
+}
+
 /// Options for one interactive run. `Debug` skips the telemetry handle (the trait object is not
 /// `Debug`).
 #[derive(Clone)]

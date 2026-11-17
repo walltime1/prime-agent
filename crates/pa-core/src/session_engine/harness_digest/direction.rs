@@ -115,6 +115,7 @@ async fn direction_rig(
         Vec::new(),
         Some(HarnessDigestContext {
             global_dir: tmp.path().join("harness"),
+            workspace_dir: None,
             local_dir: Some(
                 tmp.path()
                     .join("session-artifacts")

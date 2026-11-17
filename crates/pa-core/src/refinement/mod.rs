@@ -132,7 +132,10 @@ pub fn get_global_harness_state_dir(agent_dir: &Path) -> PathBuf {
 /// # Errors
 ///
 /// Returns an error if `workspace` fails [`validate_workspace_name`].
-pub fn get_workspace_harness_state_dir(agent_dir: &Path, workspace: &str) -> anyhow::Result<PathBuf> {
+pub fn get_workspace_harness_state_dir(
+    agent_dir: &Path,
+    workspace: &str,
+) -> anyhow::Result<PathBuf> {
     Ok(pa_types::workspace::workspace_harness_state_dir(
         agent_dir, workspace,
     )?)
@@ -269,6 +272,18 @@ pub fn load_harness_state(harness_state_dir: &Path, scope: HarnessScope) -> Harn
             .collect();
     }
     state
+}
+
+/// Layer a workspace store over global state: workspace entries replace
+/// global entries with the same id, and both refinement histories are kept.
+#[must_use]
+pub fn layer_harness_states(mut global: HarnessState, workspace: HarnessState) -> HarnessState {
+    global.schema = global.schema.max(workspace.schema);
+    for (kind, entries) in workspace.entries {
+        global.entries.entry(kind).or_default().extend(entries);
+    }
+    global.refinements.extend(workspace.refinements);
+    global
 }
 
 /// Merge global + local states: local ids conflict-prefixed with their scope.

@@ -3,6 +3,8 @@
 //! `create_session` is async.
 
 use std::path::PathBuf;
+
+use anyhow::Context;
 use std::sync::Arc;
 
 use pa_agent::agent::{Agent, AgentInitialState, AgentOptions};
@@ -21,6 +23,17 @@ use super::{AgentSession, PromptOptions, PromptOutcome};
 /// server; the settle is off every user-visible path, so the bound only
 /// keeps the background task from outliving a wedged server forever).
 const MCP_SETTLE_PER_SERVER_TIMEOUT_MS: u64 = 10_000;
+
+/// Which workspace a session's harness state lives in. `Inherit` resolves the
+/// session's recorded workspace (else its parent's, else the agent-dir default);
+/// `Global` and `Named` override that and are recorded as the session's workspace.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum WorkspaceSelection {
+    #[default]
+    Inherit,
+    Global,
+    Named(String),
+}
 
 /// Everything needed to assemble a session.
 #[derive(Default)]
@@ -112,6 +125,9 @@ pub struct SessionEngineConfig {
     /// request ids on the wire).
     pub semantic_edges: Option<super::semantic_edges::SemanticEdgeIdentity>,
     pub on_late_sent_agent_message: Option<crate::tools::ipython::LateSentAgentMessageHandler>,
+    /// Workspace override from the host (the `--workspace` flag). `Inherit`
+    /// keeps the session's recorded workspace; the chosen one is recorded for the session.
+    pub workspace_selection: WorkspaceSelection,
 }
 
 pub struct SessionEngine {
@@ -154,6 +170,9 @@ pub struct SessionEngine {
     /// loops the graph and keeps a dropped session's kernel process alive
     /// until the process exits.
     pub(crate) provisioner: std::sync::Arc<crate::kernel::provisioner::IpythonKernelProvisioner>,
+    /// The non-local harness store this session's refinements write to: its
+    /// pinned workspace's store, else the global store.
+    pub harness_write_dir: PathBuf,
 }
 
 /// Skill overrides for built-in integrations the user is not logged into,
@@ -382,21 +401,53 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
     }
     // The daemon worker owns persistence outside the session manager, so
     // its conversation-log path implies the same artifact tree.
-    let session_artifact_dir: Option<PathBuf> = wiring
-        .session
-        .lock()
-        .await
-        .get_session_artifact_dir()
-        .or_else(|| {
-            config
-                .conversation_log_path
-                .as_deref()
-                .and_then(super::harness_digest::session_artifact_dir_for_log)
-        });
-    if let Some(dir) = session_artifact_dir.as_deref() {
-        let active_ws = pa_types::workspace::read_active_workspace(&config.agent_dir);
-        let _ = pa_types::workspace::write_session_workspace(dir, active_ws.as_deref());
+    let (session_artifact_dir, session_file, header_parent) = {
+        let session = wiring.session.lock().await;
+        (
+            session.get_session_artifact_dir(),
+            session.get_session_file().map(std::path::Path::to_path_buf),
+            session
+                .get_header()
+                .and_then(|header| header.parent_session.clone()),
+        )
+    };
+    let session_artifact_dir: Option<PathBuf> = session_artifact_dir.or_else(|| {
+        config
+            .conversation_log_path
+            .as_deref()
+            .and_then(super::harness_digest::session_artifact_dir_for_log)
+    });
+    // The workspace is pinned per session: its own record, else the parent's
+    // (subagents and forks inherit), else the agent-dir default. The daemon
+    // worker owns the log file, so its header is read from there.
+    let session_file = session_file.or_else(|| config.conversation_log_path.clone());
+    let parent_session_log = session_file.as_deref().and_then(|file| {
+        header_parent
+            .or_else(|| {
+                crate::session::manager::read_session_header(file)
+                    .and_then(|header| header.parent_session)
+            })
+            .map(|parent| crate::agent_traces::resolve_parent_session_path(file, &parent))
+    });
+    let workspace = match &config.workspace_selection {
+        WorkspaceSelection::Inherit => pa_types::workspace::resolve_session_workspace(
+            &config.agent_dir,
+            session_artifact_dir.as_deref(),
+            parent_session_log.as_deref(),
+        ),
+        WorkspaceSelection::Global => None,
+        WorkspaceSelection::Named(name) => Some(name.clone()),
+    };
+    // The record pins the choice across reloads. It never creates the artifact
+    // dir: the kernel snapshots into an existing one, so creating it here would
+    // change a fresh session's kernel state. A session without one keeps its
+    // workspace in memory and re-resolves on its next load.
+    if let Some(dir) = session_artifact_dir.as_deref().filter(|dir| dir.is_dir()) {
+        pa_types::workspace::write_session_workspace(dir, workspace.as_deref())
+            .with_context(|| format!("record session workspace in {}", dir.display()))?;
     }
+    let harness_write_dir =
+        crate::refinement::resolve_harness_state_dir(&config.agent_dir, workspace.as_deref())?;
     let local_harness_dir =
         crate::refinement::get_local_harness_state_dir(session_artifact_dir.as_deref());
     // The only sessions whose `refine.*` host requests register and the
@@ -624,7 +675,8 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
     // from the session artifacts (or the daemon-owned conversation log), and
     // the interfaces the digest may reference.
     let digest_context = super::harness_digest::HarnessDigestContext {
-        global_dir: crate::refinement::get_active_harness_state_dir(&config.agent_dir),
+        global_dir: crate::refinement::get_global_harness_state_dir(&config.agent_dir),
+        workspace_dir: workspace.is_some().then(|| harness_write_dir.clone()),
         local_dir: local_harness_dir,
         include_ipython: active_tool_names
             .iter()
@@ -945,7 +997,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
     let factory_host =
         super::factory_host::FactoryHost::new(super::factory_host::FactoryHostConfig {
             agent_dir: config.agent_dir.clone(),
-            global_harness_dir: crate::refinement::get_active_harness_state_dir(&config.agent_dir),
+            global_harness_dir: harness_write_dir.clone(),
             local_harness_dir: factory_local_harness_dir,
             session_model: factory_session_model,
             allowed_models: factory_allowed_models,
@@ -966,6 +1018,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
         factory_host,
         rlm_progress_notes: Arc::clone(&wiring.rlm.notes),
         provisioner,
+        harness_write_dir,
     })
 }
 

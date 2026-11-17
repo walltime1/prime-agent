@@ -602,6 +602,8 @@ pub(crate) fn session_summary(core: &SessionCore, inputs: SummaryInputs) -> Sess
         progress_note: inputs.progress_note,
         tool_use_count: (core.tool_use_count > 0).then_some(core.tool_use_count),
         parent_session_path: store.and_then(|store| store.header.parent_session.clone()),
+        workspace: store
+            .and_then(|store| pa_types::workspace::read_session_workspace_for_log(&store.path)),
         parent_active_session_id: core.parent_active_session_id.clone(),
         parent_session_id: core.parent_session_id.clone(),
         rlm_child_id: core.rlm_child_id.clone(),

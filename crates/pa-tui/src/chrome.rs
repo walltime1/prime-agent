@@ -51,10 +51,16 @@ fn walltime_logo_spans(row: usize, text: Style, teal: Style) -> Vec<Span> {
     let mut spans: Vec<Span> = Vec::new();
     let mut run = String::new();
     let mut run_is_teal = false;
-    for (glyph, mask) in WALLTIME_LOGO[row].chars().zip(WALLTIME_LOGO_MASK[row].chars()) {
+    for (glyph, mask) in WALLTIME_LOGO[row]
+        .chars()
+        .zip(WALLTIME_LOGO_MASK[row].chars())
+    {
         let is_teal = mask == 't';
         if is_teal != run_is_teal && !run.is_empty() {
-            spans.push(Span::styled(std::mem::take(&mut run), if run_is_teal { teal } else { text }));
+            spans.push(Span::styled(
+                std::mem::take(&mut run),
+                if run_is_teal { teal } else { text },
+            ));
         }
         run_is_teal = is_teal;
         run.push(glyph);

@@ -76,10 +76,17 @@ impl AgentsViewMode {
             &self.session_activity,
             self.options.anchor_session_id.as_deref(),
         );
-        if self.workspace_filter && !scope_active {
-            let wanted = pa_types::platform::agent_dir()
-                .and_then(|dir| pa_types::workspace::read_active_workspace(&dir))
-                .unwrap_or_else(|| "global".to_string());
+        // The cycle order comes from the rows before the workspace filter narrows them.
+        let mut workspace_choices: Vec<String> = rows
+            .iter()
+            .filter(|row| row.kind == RowKind::Agent)
+            .map(|row| row.workspace.clone())
+            .collect();
+        workspace_choices
+            .sort_by(|a, b| (a == "global").cmp(&(b == "global")).then_with(|| a.cmp(b)));
+        workspace_choices.dedup();
+        self.workspace_choices = workspace_choices;
+        if let Some(wanted) = self.workspace_filter.as_deref().filter(|_| !scope_active) {
             let matching_parents: std::collections::HashSet<String> = rows
                 .iter()
                 .filter(|row| row.kind == RowKind::Agent && row.workspace == wanted)
@@ -561,18 +568,22 @@ impl AgentsViewMode {
             return;
         }
         if key == "ctrl+f" || key == "alt+w" {
-            self.workspace_filter = !self.workspace_filter;
-            let active_ws = pa_types::platform::agent_dir()
-                .and_then(|dir| pa_types::workspace::read_active_workspace(&dir));
+            // all -> each workspace in the rows (global last) -> all.
+            self.workspace_filter = match self.workspace_filter.as_deref() {
+                None => self.workspace_choices.first().cloned(),
+                Some(current) => self
+                    .workspace_choices
+                    .iter()
+                    .position(|name| name == current)
+                    .and_then(|index| self.workspace_choices.get(index + 1))
+                    .cloned(),
+            };
             self.rebuild_rows();
-            if self.workspace_filter {
-                match active_ws {
-                    Some(name) => self.set_status(&format!("Filtered to workspace '{name}' (ctrl+f to show all)")),
-                    None => self.set_status("Filtered to global workspace (ctrl+f to show all)"),
-                }
-            } else {
-                self.set_status("Showing all workspaces");
-            }
+            let status = match &self.workspace_filter {
+                Some(name) => format!("Filtered to workspace '{name}' (ctrl+f: next)"),
+                None => "Showing all workspaces".to_string(),
+            };
+            self.set_status(&status);
             return;
         }
         // `app.agents.rename` (default ctrl+r, empty editor only, before the delete arm):

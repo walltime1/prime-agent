@@ -167,7 +167,10 @@ fn main_impl(args: &[String], runtime: &dyn mode::Runtime) -> Result<i32, String
         crate::config::require_agent_dir()?;
         let agent_dir = pa_types::platform::agent_dir()
             .ok_or_else(|| "Cannot resolve agent directory".to_string())?;
-        let target = if matches!(workspace.trim(), "off" | "clear" | "global" | "none") {
+        let target = if matches!(
+            workspace.trim().to_ascii_lowercase().as_str(),
+            "off" | "clear" | "global" | "none"
+        ) {
             None
         } else {
             Some(workspace.trim())
@@ -315,6 +318,20 @@ fn main_impl(args: &[String], runtime: &dyn mode::Runtime) -> Result<i32, String
             telemetry_disabled,
         ),
         session: mode::SessionOptions {
+            workspace_selection: match parsed
+                .workspace
+                .as_deref()
+                .map(|name| name.trim().to_ascii_lowercase())
+                .as_deref()
+            {
+                None => pa_core::session_engine::engine::WorkspaceSelection::Inherit,
+                Some("off" | "clear" | "global" | "none") => {
+                    pa_core::session_engine::engine::WorkspaceSelection::Global
+                }
+                Some(name) => {
+                    pa_core::session_engine::engine::WorkspaceSelection::Named(name.to_string())
+                }
+            },
             continue_recent: parsed.continue_,
             resume_bare: parsed.resume_bare,
             resume: parsed.resume.clone(),

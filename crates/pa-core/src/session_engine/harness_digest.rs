@@ -25,6 +25,9 @@ mod direction;
 pub struct HarnessDigestContext {
     /// Global harness state directory (`<agent dir>/harness`).
     pub global_dir: PathBuf,
+    /// The session's workspace store (`<agent dir>/workspaces/<name>/harness`),
+    /// layered over global: its entries replace global entries with the same id.
+    pub workspace_dir: Option<PathBuf>,
     /// Session-local harness state directory (session artifact dir), when the
     /// session persists artifacts.
     pub local_dir: Option<PathBuf>,
@@ -66,8 +69,8 @@ pub struct HarnessDigestRender {
     pub state_fingerprint: String,
 }
 
-/// The rendered digest body (the `<harness_state>` content): merged global +
-/// local harness state, ranked by the query terms.
+/// The rendered digest body (the `<harness_state>` content): global state with
+/// the workspace layered over it, merged with local state, ranked by the query terms.
 #[must_use]
 pub fn harness_digest_text(
     context: &HarnessDigestContext,
@@ -82,7 +85,13 @@ fn render_digest_with_fingerprint(
     context: &HarnessDigestContext,
     query_terms: HarnessQueryTerms,
 ) -> HarnessDigestRender {
-    let global = load_harness_state(&context.global_dir, HarnessScope::Global);
+    let mut global = load_harness_state(&context.global_dir, HarnessScope::Global);
+    if let Some(workspace_dir) = &context.workspace_dir {
+        global = crate::refinement::layer_harness_states(
+            global,
+            load_harness_state(workspace_dir, HarnessScope::Global),
+        );
+    }
     let local = context
         .local_dir
         .as_ref()

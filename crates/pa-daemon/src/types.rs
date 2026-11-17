@@ -107,6 +107,10 @@ pub struct SessionSummary {
     pub tool_use_count: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_session_path: Option<String>,
+    /// The workspace the session recorded, read from its session file; absent for global
+    /// sessions and sessions with no record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
     /// The parent's live active-session id (subagent summaries).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_active_session_id: Option<String>,
