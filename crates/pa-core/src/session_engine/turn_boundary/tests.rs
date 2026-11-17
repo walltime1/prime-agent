@@ -353,7 +353,7 @@ async fn refine_run_and_status_round_trip_inside_a_tool_call() {
         &requests,
         "probe",
         "refine.run",
-        json!({ "instructions": "create a memory about the failing gate", "global": true }),
+        json!({ "instructions": "create a memory about the failing gate" }),
     );
     let agent = Arc::new(Agent::new(AgentOptions {
         initial_state: AgentInitialState {
@@ -398,7 +398,6 @@ async fn refine_run_and_status_round_trip_inside_a_tool_call() {
         requests.take_refine().await,
         Some(PendingRefine {
             instructions: Some("create a memory about the failing gate".to_string()),
-            global: true,
         })
     );
     assert!(requests.take_refine().await.is_none());
@@ -457,7 +456,6 @@ async fn disabled_refine_run_reports_refusal_and_does_not_schedule() {
         requests.take_refine().await,
         Some(PendingRefine {
             instructions: Some("remember this".to_string()),
-            global: false
         })
     );
 }
@@ -480,9 +478,16 @@ async fn refine_run_validates_and_merges_into_a_pending_request() {
         error.to_string(),
         "refine.run global must be a boolean when provided"
     );
+    let error = handler(&handlers, "refine.run")(payload(json!({ "global": true })))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "global refinements need the user: ask them to run /refine --global"
+    );
+    assert!(requests.take_refine().await.is_none());
     // Merge semantics through the real handler path: two `refine.run` calls inside one
-    // turn — the second without instructions keeps the first ones and ORs the global
-    // flag (TS merge).
+    // turn — the second without instructions keeps the first ones (TS merge).
     let session = Arc::new(Mutex::new(session_with_history(false)));
     let provider = Arc::new(ScriptedProvider::new(agent_model()));
     provider.push_tool_call_turn(None, vec![("call-1", "probe-a", json!({}))]);
@@ -494,12 +499,7 @@ async fn refine_run_validates_and_merges_into_a_pending_request() {
         "refine.run",
         json!({ "instructions": "first observation" }),
     );
-    let probe_again = probe_tool(
-        &requests,
-        "probe-b",
-        "refine.run",
-        json!({ "global": true }),
-    );
+    let probe_again = probe_tool(&requests, "probe-b", "refine.run", json!({}));
     let agent = Arc::new(Agent::new(AgentOptions {
         initial_state: AgentInitialState {
             system_prompt: Some("s".to_string()),
@@ -526,7 +526,6 @@ async fn refine_run_validates_and_merges_into_a_pending_request() {
         requests.take_refine().await,
         Some(PendingRefine {
             instructions: Some("first observation".to_string()),
-            global: true,
         })
     );
 }

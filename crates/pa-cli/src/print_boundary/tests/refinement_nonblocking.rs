@@ -158,7 +158,6 @@ impl Origin {
                     .turn_boundary
                     .schedule_refine(pa_core::session_engine::turn_boundary::PendingRefine {
                         instructions: None,
-                        global: false,
                     })
                     .await;
                 tokio::time::timeout(

@@ -33,8 +33,8 @@ async def run(
     you automatically. Returns `{"scheduled": True}`, or
     `{"scheduled": False, "reason": ...}` when refinement cannot start.
     Optional `instructions` focus the refinement on a specific observation.
-    Set `global_=True` to target the global (cross-session) harness store;
-    omit for local (session-scoped) refinement.
+    Refinement is session-local: `global_=True` is refused, because only the
+    user changes the global (cross-session) harness store (`/refine --global`).
     """
     if instructions is not None and not isinstance(instructions, str):
         raise TypeError(

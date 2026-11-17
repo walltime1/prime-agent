@@ -1,7 +1,9 @@
 //! Kernel harness-env e2e: a persisted session's kernel must carry the session's RLM
 //! session + local-harness dirs in its env (TS `_rlmKernelEnv`), so kernel-side
-//! `rlm.harness` writes land in the session-local store. Skips (with a note)
-//! without a live kernel install.
+//! `rlm.harness` writes land in the session-local store. `global_=True` reads resolve the
+//! true global store with the session's workspace store layered over it (the digest's
+//! view). The kernel never writes either store: `global_=True` writes are refused.
+//! Skips (with a note) without a live kernel install.
 #![cfg(unix)]
 
 use std::io::{BufRead, BufReader, Write};
@@ -66,6 +68,7 @@ fn spawn_supervisor(socket: &Path, agent_dir: &Path, kernel_python: &Path) -> Da
         .env_remove("RLM_SESSION_DIR")
         .env_remove("RLM_HARNESS_STATE_DIR")
         .env_remove("RLM_GLOBAL_HARNESS_STATE_DIR")
+        .env_remove("RLM_WORKSPACE_HARNESS_STATE_DIR")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .env(
@@ -156,11 +159,12 @@ impl Client {
     }
 }
 
-/// The one scripted cell: create + read back a session-local memory and a global
-/// one, recording success or the failure traceback in a receipt.
+/// The one scripted cell: create + read back a session-local memory, check a global
+/// write is refused, and record where `global_=True` resolves and what a layered
+/// `global_=True` search finds, in a receipt that carries success or the failure traceback.
 fn harness_cell(receipt: &Path) -> String {
     format!(
-        "import json, traceback\nreceipt = {{\"ok\": False, \"error\": \"\"}}\ntry:\n    rlm.harness.create_memory(title=\"kernel session-local memory\", content=\"persisted from the session kernel\", id=\"kernel-local-memory\")\n    rlm.get_harness_state().entries[\"memory\"][\"kernel-local-memory\"]\n    rlm.harness.create_memory(title=\"kernel global memory\", content=\"persisted from the session kernel\", id=\"kernel-global-memory\", global_=True)\n    receipt = {{\"ok\": True, \"error\": \"\"}}\nexcept Exception:\n    receipt = {{\"ok\": False, \"error\": traceback.format_exc()}}\nopen({receipt_path:?}, \"w\").write(json.dumps(receipt))\n",
+        "import json, traceback\nreceipt = {{\"ok\": False, \"error\": \"\"}}\ntry:\n    rlm.harness.create_memory(title=\"kernel session-local memory\", content=\"persisted from the session kernel\", id=\"kernel-local-memory\")\n    rlm.get_harness_state().entries[\"memory\"][\"kernel-local-memory\"]\n    try:\n        rlm.harness.create_memory(title=\"kernel global memory\", content=\"must be refused\", id=\"kernel-global-memory\", global_=True)\n        refusal = \"\"\n    except RuntimeError as exc:\n        refusal = str(exc)\n    hits = rlm.harness.search(\"pelican\", global_=True)\n    receipt = {{\"ok\": True, \"error\": \"\", \"refusal\": refusal, \"global_state_file\": str(rlm.get_harness_state(global_=True).file_path), \"global_hit_ids\": sorted(entry.id for entry in hits), \"shared_content\": rlm.harness.get(\"memory\", \"shared\", global_=True).content}}\nexcept Exception:\n    receipt = {{\"ok\": False, \"error\": traceback.format_exc()}}\nopen({receipt_path:?}, \"w\").write(json.dumps(receipt))\n",
         receipt_path = receipt.to_string_lossy(),
     )
 }
@@ -213,12 +217,46 @@ fn assert_stored_memory(state: &Value, id: &str, title: &str, content: &str, sco
     );
 }
 
+/// Write a harness state file holding one memory per `(id, content)` pair.
+fn seed_memories(state_file: &Path, memories: &[(&str, &str)]) {
+    let entries: serde_json::Map<String, Value> = memories
+        .iter()
+        .map(|(id, content)| {
+            (
+                (*id).to_string(),
+                json!({
+                    "id": id,
+                    "kind": "memory",
+                    "title": id,
+                    "content": content,
+                    "path": "general",
+                    "scope": "global",
+                    "reference": {},
+                    "arguments": {},
+                    "metadata": {},
+                    "source": "agent",
+                    "version": 1,
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                }),
+            )
+        })
+        .collect();
+    std::fs::create_dir_all(state_file.parent().expect("state file parent")).expect("state dir");
+    std::fs::write(
+        state_file,
+        json!({ "schema": 1, "entries": { "memory": entries }, "refinements": [] }).to_string(),
+    )
+    .expect("seed harness state");
+}
+
 fn read_state(path: &Path) -> Value {
     let content = std::fs::read_to_string(path).expect("read harness state");
     serde_json::from_str(&content).expect("parse harness state")
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // one linear scenario: seed stores, run the session, assert the receipt and stores
 fn persistent_session_kernel_writes_the_session_local_harness_store() {
     let Some(kernel_python) = kernel_python() else {
         return;
@@ -232,6 +270,32 @@ fn persistent_session_kernel_writes_the_session_local_harness_store() {
     let script = write_faux_script(dir.path(), &harness_cell(&receipt));
 
     let _daemon = spawn_supervisor(&socket, &agent_dir, &kernel_python);
+    // The default workspace pins new sessions to `workspaces/demo/harness`. The true
+    // global store holds a "global-only" entry and a "shared" one the workspace
+    // store overrides; the workspace store adds a "workspace-only" entry.
+    let global_state_file = agent_dir.join("harness").join("harness_state.json");
+    let workspace_state_file = agent_dir
+        .join("workspaces")
+        .join("demo")
+        .join("harness")
+        .join("harness_state.json");
+    seed_memories(
+        &global_state_file,
+        &[
+            ("global-only", "pelican from the true global store"),
+            ("shared", "pelican shared, global version"),
+        ],
+    );
+    seed_memories(
+        &workspace_state_file,
+        &[
+            ("workspace-only", "pelican from the workspace store"),
+            ("shared", "pelican shared, workspace version"),
+        ],
+    );
+    let seeded_global = read_state(&global_state_file);
+    let seeded_workspace = read_state(&workspace_state_file);
+    std::fs::write(agent_dir.join("active_workspace"), "demo\n").expect("active workspace");
     wait_socket_ready(&socket);
     let (mut client, hello) = Client::connect(&socket);
     assert_eq!(hello["type"], "daemon_hello");
@@ -292,13 +356,36 @@ fn persistent_session_kernel_writes_the_session_local_harness_store() {
         "local",
     );
 
-    // The global store stays the agent dir's harness file.
-    let global_state_file = agent_dir.join("harness").join("harness_state.json");
-    assert_stored_memory(
-        &read_state(&global_state_file),
-        "kernel-global-memory",
-        "kernel global memory",
-        "persisted from the session kernel",
-        "global",
+    // The kernel refused the global write, and `global_=True` reads resolve to the TRUE
+    // global store with the workspace store layered over it (workspace wins on `shared`).
+    assert!(
+        cell_receipt["refusal"]
+            .as_str()
+            .is_some_and(|refusal| refusal.contains("/refine --global")),
+        "the global write was not refused: {cell_receipt}"
+    );
+    assert_eq!(
+        Path::new(cell_receipt["global_state_file"].as_str().expect("path")),
+        std::fs::canonicalize(&global_state_file).expect("global state file"),
+        "global_=True must resolve to the true global store"
+    );
+    assert_eq!(
+        cell_receipt["global_hit_ids"],
+        json!(["global-only", "shared", "workspace-only"]),
+        "global_=True search must see the global and the workspace entries"
+    );
+    assert_eq!(
+        cell_receipt["shared_content"], "pelican shared, workspace version",
+        "the workspace entry must replace the global one with the same id"
+    );
+    assert_eq!(
+        read_state(&global_state_file),
+        seeded_global,
+        "a refused global write must leave the global store untouched"
+    );
+    assert_eq!(
+        read_state(&workspace_state_file),
+        seeded_workspace,
+        "a refused global write must leave the workspace store untouched"
     );
 }

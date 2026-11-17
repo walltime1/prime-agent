@@ -434,7 +434,12 @@ impl AgentSession {
         let agent_dir = self.agent_dir.clone();
         let auxiliary = self.auxiliary_model.clone();
         let usage_store = self.usage_store.clone();
+        let rlm_depth = self.rlm_depth;
         tokio::spawn(async move {
+            anyhow::ensure!(
+                !(options.global && rlm_depth > 0),
+                refine::CHILD_GLOBAL_REFINEMENT_ERROR
+            );
             let session_id = session.lock().await.get_session_id().to_string();
             let refiner =
                 refine::session_refiner_call(auxiliary, &model, api_key, session_id).await?;

@@ -232,7 +232,13 @@ pub fn kernel_python_skills(skills: &[Skill]) -> Vec<KernelPythonSkill> {
 /// (`PRIME_AGENT_CODING_AGENT_DIR`): an embedding host whose ambient env differs must not
 /// leak its own paths into the kernel (#109). A persistent session's artifact dir is
 /// likewise propagated (`RLM_SESSION_DIR` + `RLM_HARNESS_STATE_DIR`), so kernel-side
-/// harness writes land in the session-local store. The artifact dir is keyed by the
+/// harness writes land in the session-local store. `global_dir` (the true global store) is
+/// exported as `RLM_GLOBAL_HARNESS_STATE_DIR`, and a workspace-pinned session's
+/// `workspace_dir` as `RLM_WORKSPACE_HARNESS_STATE_DIR`: kernel `global_=True` reads layer
+/// the workspace store over the global one, the same view the digest shows. The kernel never
+/// writes either: `RLM_HARNESS_GLOBAL_WRITES=off` makes `global_=True` writes raise (a soft
+/// guard, since the model has `bash`), and global changes go through the user's
+/// `/refine --global`. The artifact dir is keyed by the
 /// durable session id (the session file's stem), exported as `RLM_SESSION_ID` for the
 /// persistent `bash()` shells' assignment. `cwd` is the SESSION's working directory.
 /// `shell_path` is the session-start-resolved kernel shell: an invalid `shellPath` fails
@@ -249,6 +255,8 @@ pub fn kernel_provisioner(
     command_prefix: Option<String>,
     websearch_env: Vec<(String, String)>,
     session_artifact_dir: Option<std::path::PathBuf>,
+    global_dir: std::path::PathBuf,
+    workspace_dir: Option<std::path::PathBuf>,
     cell_timeout_ms: Option<u64>,
     on_restore: Option<crate::kernel::provisioner::RestoreCallback>,
     on_background_work_settled: Option<crate::kernel::shared::BackgroundWorkSettledCallback>,
@@ -256,7 +264,7 @@ pub fn kernel_provisioner(
     on_bootstrap_result: Option<crate::kernel::provisioner::KernelBootstrapResultHandler>,
     ready_gate: Option<crate::kernel::provisioner::KernelReadyGate>,
 ) -> Arc<KernelProvisioner> {
-    let mut env = HashMap::with_capacity(3);
+    let mut env = HashMap::with_capacity(5);
     env.insert(
         "PRIME_AGENT_CODING_AGENT_DIR".to_string(),
         agent_dir.to_string_lossy().to_string(),
@@ -275,11 +283,14 @@ pub fn kernel_provisioner(
             "RLM_HARNESS_STATE_DIR",
             crate::refinement::get_local_harness_state_dir(session_artifact_dir.as_deref()),
         ),
+        ("RLM_GLOBAL_HARNESS_STATE_DIR", Some(global_dir)),
+        ("RLM_WORKSPACE_HARNESS_STATE_DIR", workspace_dir),
     ] {
         if let Some(value) = value {
             env.insert(key.to_string(), value.to_string_lossy().to_string());
         }
     }
+    env.insert("RLM_HARNESS_GLOBAL_WRITES".to_string(), "off".to_string());
     env.extend(websearch_env);
     Arc::new(KernelProvisioner::new(
         cwd,

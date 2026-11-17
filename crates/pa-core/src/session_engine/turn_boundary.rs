@@ -28,7 +28,6 @@ pub struct PendingCompaction {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingRefine {
     pub instructions: Option<String>,
-    pub global: bool,
 }
 
 /// The model facts `model.info` reports (TS answers nulls when the session
@@ -352,6 +351,9 @@ impl TurnBoundaryRequests {
                             "refine.run global must be a boolean when provided"
                         ),
                     };
+                    if global == Some(true) {
+                        anyhow::bail!(super::refine::GLOBAL_REFINEMENT_NEEDS_USER_ERROR);
+                    }
                     let Some(runtime) = requests.bound() else {
                         return Ok(no_active_turn(
                             "no active turn; refine can only be requested while a turn is running",
@@ -374,11 +376,9 @@ impl TurnBoundaryRequests {
                         Some(current) => PendingRefine {
                             instructions: instructions
                                 .or_else(|| current.instructions.clone()),
-                            global: global.unwrap_or(current.global),
                         },
                         None => PendingRefine {
                             instructions,
-                            global: global.unwrap_or(false),
                         },
                     };
                     *slot = Some(merged);
@@ -430,7 +430,7 @@ impl SessionEngine {
         let pending = self.turn_boundary.take_refine().await?;
         Some(self.session.start_refinement(
             super::refine::RefineOptions {
-                global: pending.global,
+                global: false,
                 instructions: pending.instructions,
                 rollback_id: None,
             },

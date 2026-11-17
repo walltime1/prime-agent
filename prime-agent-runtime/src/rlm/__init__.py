@@ -596,7 +596,7 @@ class _HarnessProxy:
                         in_memory=True,
                         local_write_error=(
                             f"{exc} This session has no persistent local harness store; "
-                            "pass global_=True to persist across sessions."
+                            "ask the user to run /refine --global to persist across sessions."
                         ),
                     )
                 return _HarnessProxy._unpersisted

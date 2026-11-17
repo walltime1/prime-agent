@@ -175,6 +175,16 @@ def _env_dir(name: str) -> str | None:
     return value or None
 
 
+# The host sets RLM_HARNESS_GLOBAL_WRITES=off in every session kernel: global
+# changes go through the user's /refine --global, never a kernel write. This is a
+# soft guard against accidental writes, not a security boundary: the model has
+# bash and can edit the state file directly.
+_GLOBAL_WRITES_OFF_ERROR = (
+    "the kernel never writes the global harness store; "
+    "ask the user to run /refine --global (or write a local entry instead)"
+)
+
+
 def _state_file(state_dir: str | Path | None = None, *, global_: bool = False) -> Path:
     root: str | Path | None = state_dir
     if root is None:
@@ -189,6 +199,12 @@ def _state_file(state_dir: str | Path | None = None, *, global_: bool = False) -
     if root:
         return Path(root).expanduser().resolve() / _DEFAULT_FILE_NAME
     return _agent_dir() / _DEFAULT_HARNESS_DIR_NAME / _DEFAULT_FILE_NAME
+
+
+def _workspace_overlay_file() -> Path | None:
+    """The workspace store a pinned session layers over the global one, if any."""
+    root = _env_dir("RLM_WORKSPACE_HARNESS_STATE_DIR")
+    return Path(root).expanduser().resolve() / _DEFAULT_FILE_NAME if root else None
 
 
 @dataclass
@@ -407,6 +423,7 @@ class HarnessState:
         in_memory: bool = False,
         scope: HarnessScope = "local",
         local_write_error: str | None = None,
+        overlay_path: Path | None = None,
     ):
         # in_memory mode never resolves or touches a path. It is the safe fallback when
         # path resolution itself fails, so constructing it cannot re-raise that error.
@@ -425,6 +442,12 @@ class HarnessState:
         self.entries: dict[HarnessKind, dict[str, HarnessEntry]] = {kind: {} for kind in _KINDS}
         self.refinements: list[RefinementEvent] = []
         self._global_target_state_dir: Path | None = None
+        # A workspace store layered over this (global) state on every load: its entries
+        # replace same-id entries and its refinements are appended, matching the host's
+        # refinement::layer_harness_states. Read-only: _ensure_writable refuses writes
+        # to a layered state, so the merged view is never saved into the global file.
+        self._overlay_path = overlay_path
+        self._loaded_overlay_mtime: int | None = None
         # mtime of the file as of the last load/save, used to detect out-of-process
         # writes (e.g. the host `/refine` command) and avoid clobbering them.
         self._loaded_mtime: int | None = None
@@ -434,10 +457,14 @@ class HarnessState:
         if not in_memory:
             self.load()
 
-    def _ensure_local_writable(self) -> None:
+    def _ensure_writable(self) -> None:
         _require_refinements_enabled()
         if self._local_write_error is not None:
             raise RuntimeError(self._local_write_error)
+        if self.scope == "global" and (
+            self._overlay_path is not None or _env_dir("RLM_HARNESS_GLOBAL_WRITES") == "off"
+        ):
+            raise RuntimeError(_GLOBAL_WRITES_OFF_ERROR)
 
     def _disk_mtime(self) -> int | None:
         if self.file_path is None:
@@ -446,6 +473,25 @@ class HarnessState:
             return self.file_path.stat().st_mtime_ns
         except OSError:
             return None
+
+    def _overlay_mtime(self) -> int | None:
+        if self._overlay_path is None:
+            return None
+        try:
+            return self._overlay_path.stat().st_mtime_ns
+        except OSError:
+            return None
+
+    def _layer_overlay(self) -> None:
+        # The mtime is taken before the read, like the main file's, so a concurrent
+        # rewrite triggers another reload instead of being recorded as seen.
+        self._loaded_overlay_mtime = self._overlay_mtime()
+        if self._overlay_path is None:
+            return
+        overlay = HarnessState(self._overlay_path, scope=self.scope)
+        for kind, entries in overlay.entries.items():
+            self.entries[kind].update(entries)
+        self.refinements.extend(overlay.refinements)
 
     def _sync_from_disk(self) -> None:
         """Reload if another process rewrote the state file since we last touched it.
@@ -457,7 +503,7 @@ class HarnessState:
         value recorded at our last load/save.
         """
         _require_refinements_enabled()
-        if self._disk_mtime() != self._loaded_mtime:
+        if self._disk_mtime() != self._loaded_mtime or self._overlay_mtime() != self._loaded_overlay_mtime:
             self.load()
 
     @staticmethod
@@ -541,6 +587,7 @@ class HarnessState:
         _require_refinements_enabled()
         if self.file_path is None or not self.file_path.exists():
             self._loaded_mtime = None
+            self._layer_overlay()
             return self
         mtime = self._disk_mtime()
         try:
@@ -614,6 +661,7 @@ class HarnessState:
                         continue
                     self.refinements.append(RefinementEvent(**event_data))
         self._loaded_mtime = mtime
+        self._layer_overlay()
         return self
 
     def _global_target(self, global_: bool, extra: dict[str, Any] | None = None) -> "HarnessState | None":
@@ -703,7 +751,7 @@ class HarnessState:
                 metadata=metadata,
                 source=source,
             )
-        self._ensure_local_writable()
+        self._ensure_writable()
         with self._locked():
             return self._upsert(
                 kind,
@@ -810,7 +858,7 @@ class HarnessState:
         id, global_ = _strip_scope_prefix(id, global_)
         if target := self._global_target(global_, kwargs):
             return target.delete(kind, id)
-        self._ensure_local_writable()
+        self._ensure_writable()
         with self._locked():
             if kind not in self.entries:
                 raise ValueError(f"unknown harness kind {kind!r}; expected one of {_KINDS}")
@@ -860,7 +908,7 @@ class HarnessState:
                 metadata=metadata,
                 source=source,
             )
-        self._ensure_local_writable()
+        self._ensure_writable()
         with self._locked():
             if kind not in self.entries:
                 raise ValueError(f"unknown harness kind {kind!r}; expected one of {_KINDS}")
@@ -910,7 +958,7 @@ class HarnessState:
                 metadata=metadata,
                 source=source,
             )
-        self._ensure_local_writable()
+        self._ensure_writable()
         with self._locked():
             if kind not in self.entries:
                 raise ValueError(f"unknown harness kind {kind!r}; expected one of {_KINDS}")
@@ -1169,7 +1217,7 @@ class HarnessState:
     ) -> RefinementEvent:
         if target := self._global_target(global_, kwargs):
             return target.record_refinement(trigger, changes, evidence=evidence, outcome=outcome, id=id)
-        self._ensure_local_writable()
+        self._ensure_writable()
         with self._locked():
             _validate_refinement_event(trigger, changes, evidence=evidence, outcome=outcome)
             if id is not None and (not isinstance(id, str) or not id):
@@ -1354,7 +1402,12 @@ def get_harness_state(
     cache_key = (file_path, scope)
     state = _state_cache.get(cache_key)
     if state is None:
-        state = HarnessState(file_path, scope=scope)
+        # A pinned session's global read view layers the workspace store over the env
+        # global store; an explicit state_dir that diverges from it is left plain.
+        overlay_path = (
+            _workspace_overlay_file() if global_ and file_path == _state_file(global_=True) else None
+        )
+        state = HarnessState(file_path, scope=scope, overlay_path=overlay_path)
         # Recorded at construction only: an instance created from env defaults must
         # keep targeting RLM_GLOBAL_HARNESS_STATE_DIR even when a later explicit
         # state_dir call aliases the same local file. An explicit dir that merely

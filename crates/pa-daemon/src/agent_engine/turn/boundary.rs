@@ -60,7 +60,6 @@ impl AgentSessionEngine {
             }
         };
         let (model, api_key) = self.resolve_request_target(model);
-        let global_harness_dir = self.config.agent_dir.clone();
         // The start event goes out before the summarizer runs, carrying the
         // pending instructions.
         let scheduled = {
@@ -104,7 +103,7 @@ impl AgentSessionEngine {
                     .consume_pending_compaction(&model, api_key.clone(), Some(&signal))
                     .await;
                 if let Some(pending) = engine
-                    .start_pending_refinement(&model, api_key, global_harness_dir)
+                    .start_pending_refinement(&model, api_key, engine.harness_write_dir.clone())
                     .await
                 {
                     self.report_background_refinement(pending);
@@ -264,7 +263,6 @@ mod tests {
                 .runtime
                 .block_on(session.turn_boundary.schedule_refine(PendingRefine {
                     instructions: Some("Verify the completed outcome".to_string()),
-                    global: false,
                 }));
         }
         let (send, receive) = std::sync::mpsc::channel();

@@ -15,7 +15,6 @@ the Python REPL:
 await refine.status()
 await refine.run()
 await refine.run("create a memory about always checking git status before committing")
-await refine.run("promote the error-handling pattern to a global skill", global_=True)
 ```
 
 ## API
@@ -26,8 +25,9 @@ await refine.run("promote the error-handling pattern to a global skill", global_
 - `await refine.run(instructions=None, global_=False)` — schedule refinement.
   Returns `{"scheduled": True}` immediately, or `{"scheduled": False, "reason": ...}`
   when refinement cannot start. Optional `instructions` focus the refinement on a
-  specific observation. Set `global_=True` to target the global harness store
-  (cross-session); omit for local (session-scoped) refinement.
+  specific observation. Refinement is session-local; `global_=True` is refused with
+  "global refinements need the user: ask them to run /refine --global", because only
+  the user changes the global (cross-session) harness store.
 
 ## Rules
 

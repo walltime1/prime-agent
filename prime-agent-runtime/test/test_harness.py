@@ -1208,6 +1208,128 @@ class HarnessStateTest(unittest.TestCase):
                 HarnessState(global_dir / "harness_state.json", scope="global").get("memory", "kwargs_global_note")
             )
 
+    def test_global_writes_off_rejects_global_writes_but_keeps_reads_and_local_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_dir = Path(temp_dir) / "local"
+            global_dir = Path(temp_dir) / "global"
+            HarnessState(global_dir / "harness_state.json", scope="global").create_memory(
+                "Seeded", "written by the host", id="seeded"
+            )
+            env = {
+                "RLM_HARNESS_STATE_DIR": str(local_dir),
+                "RLM_GLOBAL_HARNESS_STATE_DIR": str(global_dir),
+                "RLM_HARNESS_GLOBAL_WRITES": "off",
+            }
+            with patch.dict(os.environ, env):
+                state = get_harness_state()
+                with self.assertRaisesRegex(RuntimeError, r"/refine --global"):
+                    state.create_memory("Nope", "blocked", id="nope", global_=True)
+                with self.assertRaisesRegex(RuntimeError, r"/refine --global"):
+                    state.delete("memory", "seeded", global_=True)
+                self.assertEqual(state.get("memory", "seeded", global_=True).content, "written by the host")
+                local_entry = state.create_memory("Mine", "local write", id="mine")
+
+            self.assertEqual(local_entry.scope, "local")
+            global_state = HarnessState(global_dir / "harness_state.json", scope="global")
+            self.assertIsNone(global_state.get("memory", "nope"))
+            self.assertIsNotNone(global_state.get("memory", "seeded"))
+
+    def test_global_reads_layer_workspace_store_over_global_and_writes_stay_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_dir = Path(temp_dir) / "local"
+            global_dir = Path(temp_dir) / "global"
+            workspace_dir = Path(temp_dir) / "workspace"
+            global_store = HarnessState(global_dir / "harness_state.json", scope="global")
+            global_store.create_memory("Shared (global)", "global body", id="shared")
+            global_store.create_memory("Global only", "zebra-global", id="global_only")
+            workspace_store = HarnessState(workspace_dir / "harness_state.json", scope="global")
+            workspace_store.create_memory("Shared (workspace)", "workspace body", id="shared")
+            workspace_store.create_memory("Workspace only", "zebra-workspace", id="workspace_only")
+            env = {
+                "RLM_HARNESS_STATE_DIR": str(local_dir),
+                "RLM_GLOBAL_HARNESS_STATE_DIR": str(global_dir),
+                "RLM_WORKSPACE_HARNESS_STATE_DIR": str(workspace_dir),
+                "RLM_HARNESS_GLOBAL_WRITES": "off",
+            }
+            with patch.dict(os.environ, env):
+                state = get_harness_state()
+
+                self.assertEqual(state.get("memory", "shared", global_=True).content, "workspace body")
+                self.assertIsNotNone(state.get("memory", "global_only", global_=True))
+                self.assertIsNotNone(state.get("memory", "workspace_only", global_=True))
+                self.assertEqual(
+                    sorted(entry.id for entry in state.list("memory", global_=True)),
+                    ["global_only", "shared", "workspace_only"],
+                )
+                self.assertEqual(
+                    sorted(entry.id for entry in state.search("zebra", global_=True)),
+                    ["global_only", "workspace_only"],
+                )
+                self.assertIn("Shared (workspace)", state.overview(global_=True))
+                self.assertNotIn("Shared (global)", state.overview(global_=True))
+                self.assertEqual(len(state.snapshot(global_=True)["entries"]["memory"]), 3)
+
+                # The workspace store changing on disk is picked up by the next read.
+                with patch.dict(os.environ, {"RLM_HARNESS_GLOBAL_WRITES": "on"}):
+                    workspace_store.create_memory("Late", "zebra-late", id="late")
+                self.assertIsNotNone(state.get("memory", "late", global_=True))
+
+                with self.assertRaisesRegex(RuntimeError, r"/refine --global"):
+                    state.create_memory("Nope", "blocked", id="nope", global_=True)
+                with self.assertRaisesRegex(RuntimeError, r"/refine --global"):
+                    state.delete("memory", "workspace_only", global_=True)
+                # Local reads never see either store.
+                self.assertIsNone(state.get("memory", "shared"))
+
+            self.assertEqual(
+                HarnessState(global_dir / "harness_state.json", scope="global").get("memory", "shared").content,
+                "global body",
+            )
+            self.assertIsNone(HarnessState(global_dir / "harness_state.json", scope="global").get("memory", "workspace_only"))
+
+    def test_unpinned_global_reads_see_only_the_global_store(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_dir = Path(temp_dir) / "local"
+            global_dir = Path(temp_dir) / "global"
+            stray_workspace_dir = Path(temp_dir) / "workspace"
+            HarnessState(global_dir / "harness_state.json", scope="global").create_memory(
+                "Global only", "global body", id="global_only"
+            )
+            HarnessState(stray_workspace_dir / "harness_state.json", scope="global").create_memory(
+                "Workspace only", "workspace body", id="workspace_only"
+            )
+            env = {
+                "RLM_HARNESS_STATE_DIR": str(local_dir),
+                "RLM_GLOBAL_HARNESS_STATE_DIR": str(global_dir),
+                "RLM_HARNESS_GLOBAL_WRITES": "off",
+            }
+            with patch.dict(os.environ, env):
+                os.environ.pop("RLM_WORKSPACE_HARNESS_STATE_DIR", None)
+                state = get_harness_state()
+                self.assertEqual(
+                    [entry.id for entry in state.list("memory", global_=True)], ["global_only"]
+                )
+                with self.assertRaisesRegex(RuntimeError, r"/refine --global"):
+                    state.create_memory("Nope", "blocked", id="nope", global_=True)
+
+    def test_layered_global_state_refuses_writes_even_without_the_off_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            global_dir = Path(temp_dir) / "global"
+            workspace_dir = Path(temp_dir) / "workspace"
+            HarnessState(workspace_dir / "harness_state.json", scope="global").create_memory(
+                "Workspace only", "w", id="workspace_only"
+            )
+            layered = HarnessState(
+                global_dir / "harness_state.json",
+                scope="global",
+                overlay_path=workspace_dir / "harness_state.json",
+            )
+
+            self.assertIsNotNone(layered.get("memory", "workspace_only"))
+            with self.assertRaisesRegex(RuntimeError, r"/refine --global"):
+                layered.create_memory("Nope", "blocked", id="nope")
+            self.assertFalse((global_dir / "harness_state.json").exists())
+
     def test_global_kwarg_must_be_boolean(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             state = HarnessState(Path(temp_dir) / "harness_state.json")

@@ -565,6 +565,8 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
         kernel_command_prefix,
         websearch_env,
         session_artifact_dir,
+        crate::refinement::get_global_harness_state_dir(&config.agent_dir),
+        workspace.is_some().then(|| harness_write_dir.clone()),
         cell_timeout_ms,
         on_restore,
         config.on_background_work_settled.clone(),
@@ -850,6 +852,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
     )));
     session.set_auto_refine(auto_refine_allowed, auto_refine_gates);
     session.set_agent_dir(config.agent_dir.clone());
+    session.set_rlm_depth(config.rlm_depth.unwrap_or(0));
     session.set_usage_store(wiring.rlm_usage.store());
     // Keep the context descriptor even while disabled, so re-enabling can load it.
     session.harness_digest = Some(digest_context);

@@ -1173,6 +1173,34 @@ async fn closing_session_cancels_background_planning_without_committing() {
     assert!(!crate::refinement::get_harness_state_path(&global_dir).exists());
 }
 
+/// A child session (depth above 0) cannot start a global refinement, even
+/// the user's: global changes are promoted by the lead or the user.
+#[tokio::test]
+async fn child_session_refuses_global_refinement() {
+    let (mut session, tmp) = refine_test_session().await;
+    session.set_rlm_depth(1);
+    let global_dir = tmp.path().join("harness");
+    let error = session
+        .start_refinement(
+            refine::RefineOptions {
+                global: true,
+                ..Default::default()
+            },
+            refine::RefinementSource::User,
+            session_ai_model(),
+            None,
+            global_dir.clone(),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "child sessions write local harness entries only; ask the lead or the user to promote"
+    );
+    assert!(!global_dir.exists());
+}
+
 /// The background funnel (the auto-refine and requested-refinement paths)
 /// refuses before planning when the settings disable refinements: the gate
 /// lives in the shared prepare step, not only the foreground executor.

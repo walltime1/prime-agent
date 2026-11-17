@@ -140,6 +140,9 @@ pub struct AgentSession {
     /// Whether this session may auto-refine; defaults off until the
     /// engine wiring resolves it.
     auto_refine_allowed: bool,
+    /// The session's depth in the RLM recursion tree (0 for top-level
+    /// sessions); children never start global refinements.
+    rlm_depth: u32,
     refinement_settings: Option<crate::settings::SettingsManager>,
     /// The resolved auto-refine gates; the compact trigger reads them.
     auto_refine: refine::AutoRefineGates,
@@ -252,6 +255,7 @@ impl AgentSession {
             compaction: std::sync::RwLock::new(compaction::CompactionSettings::default()),
             auxiliary_model: None,
             auto_refine_allowed: false,
+            rlm_depth: 0,
             refinement_settings: None,
             auto_refine: refine::AutoRefineGates::default(),
             compact_auto_refine: Arc::default(),

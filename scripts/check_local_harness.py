@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive the real REPL through session-local/global memory CRUD and isolation.
+"""Drive the real REPL through session-local memory CRUD, isolation, and the global write refusal.
 
 Uses the restore-notice check's loopback-provider protocol and subprocess
 isolation. Checks actual tool results and persisted files, not source strings.
@@ -28,9 +28,8 @@ def entry(value):
         row[key] = '<timestamp>'
     return row
 result = {
-    'env': {key: os.environ.get(key) for key in ('RLM_SESSION_DIR', 'RLM_HARNESS_STATE_DIR', 'RLM_GLOBAL_HARNESS_STATE_DIR')},
+    'env': {key: os.environ.get(key) for key in ('RLM_SESSION_DIR', 'RLM_HARNESS_STATE_DIR', 'RLM_GLOBAL_HARNESS_STATE_DIR', 'RLM_WORKSPACE_HARNESS_STATE_DIR', 'RLM_HARNESS_GLOBAL_WRITES')},
     'local': entry(state.get('memory', 'parity-local')),
-    'global': entry(state.get('memory', 'parity-global', global_=True)),
     'deleted': entry(state.get('memory', 'parity-delete')),
     'local_ids': sorted(item.id for item in state.list('memory')),
     'global_ids': sorted(item.id for item in state.list('memory', global_=True)),
@@ -38,13 +37,14 @@ result = {
 print('LOCAL_HARNESS_PARITY=' + json.dumps(result))"""
 SETUP = """rlm.harness.create_memory(title='local initial', content='local initial body', id='parity-local')
 rlm.harness.update_memory(id='parity-local', title='local updated', content='local updated body')
-rlm.harness.create_memory(title='global initial', content='global initial body', id='parity-global', global_=True)
-rlm.harness.update_memory(id='parity-global', title='global updated', content='global updated body', global_=True)
 rlm.harness.create_memory(title='delete me', content='temporary', id='parity-delete')
 assert rlm.harness.delete_memory('parity-delete') is True
-rlm.harness.create_memory(title='delete global', content='temporary', id='parity-delete-global', global_=True)
-assert rlm.harness.delete_memory('parity-delete-global', global_=True) is True
-""" + READ
+try:
+    rlm.harness.create_memory(title='global refused', content='never stored', id='parity-global', global_=True)
+    refusal = None
+except RuntimeError as error:
+    refusal = str(error)
+""" + READ.replace("result = {", "result = {\n    'refusal': refusal,", 1)
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -158,24 +158,27 @@ def run_case(binary, root, observation):
             artifact = root / 'session-artifacts' / session_id
             assert probe['env']['RLM_SESSION_DIR'] == str(artifact), probe['env']
             assert probe['env']['RLM_HARNESS_STATE_DIR'] == str(artifact / 'harness'), probe['env']
-            # RLM_GLOBAL_HARNESS_STATE_DIR stays unset; the runtime resolves
-            # PRIME_AGENT_CODING_AGENT_DIR/harness, checked on disk below.
-            assert probe['env']['RLM_GLOBAL_HARNESS_STATE_DIR'] is None, probe['env']
+            # An unpinned session reads the true global store and never writes it.
+            assert probe['env']['RLM_GLOBAL_HARNESS_STATE_DIR'] == str(agent / 'harness'), probe['env']
+            assert probe['env']['RLM_WORKSPACE_HARNESS_STATE_DIR'] is None, probe['env']
+            assert probe['env']['RLM_HARNESS_GLOBAL_WRITES'] == 'off', probe['env']
             observation[phase]['kernel_env'] = probe.pop('env')
             assert probe['local_ids'] == ([] if phase == 'other' else ['parity-local']), probe
-            assert probe['global_ids'] == ['parity-global'], probe
+            assert probe['global_ids'] == [], probe
+            refusal = probe.pop('refusal', None)
+            if phase == 'setup':
+                assert 'never writes the global harness store' in (refusal or ''), refusal
             assert probe['deleted'] is None, probe
             assert (probe['local'] is None) == (phase == 'other'), probe
             if phase != 'other':
                 assert stored(artifact / 'harness' / 'harness_state.json') == {'parity-local': probe['local']}
-            assert stored(agent / 'harness' / 'harness_state.json') == {'parity-global': probe['global']}
-            for scope in ('local', 'global'):
-                row = probe[scope]
-                if row is not None:
-                    assert row['scope'] == scope and row['id'] == 'parity-' + scope, row
-                    assert row['title'] == scope + ' updated' and row['content'] == scope + ' updated body', row
+            assert not (agent / 'harness' / 'harness_state.json').exists(), 'the kernel wrote the global store'
+            row = probe['local']
+            if row is not None:
+                assert row['scope'] == 'local' and row['id'] == 'parity-local', row
+                assert row['title'] == 'local updated' and row['content'] == 'local updated body', row
             probes[phase] = probe
-        assert probes['setup'] == probes['resume'], 'local/global CRUD did not survive resume'
+        assert probes['setup'] == probes['resume'], 'local CRUD did not survive resume'
         observation.update(probes=probes, offered_repl_tool_names=server.tool_names)
     finally:
         server.shutdown()
@@ -189,7 +192,7 @@ def main():
     args = parser.parse_args()
     result = {'verified': False,
         'tool_name_selection': 'Select offered python_repl or legacy ipython.',
-        'scope': 'Actual REPL results and local/global files: CRUD, resume durability, fresh-session isolation.'}
+        'scope': 'Actual REPL results and local files: CRUD, resume durability, fresh-session isolation, global write refusal.'}
     try:
         assert sys.platform == 'linux', 'requires Linux hosted CI binaries'
         with tempfile.TemporaryDirectory(prefix='local-harness-check-') as temp:

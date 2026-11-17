@@ -140,6 +140,12 @@ impl AgentSession {
         self.auto_refine = gates;
     }
 
+    /// Bind the session's depth in the RLM recursion tree; a child
+    /// (depth above 0) is refused global refinements.
+    pub fn set_rlm_depth(&mut self, rlm_depth: u32) {
+        self.rlm_depth = rlm_depth;
+    }
+
     /// Bind the session's agent dir (the settings root). The refine flow
     /// reads the `factory.enabled` opt-in from the agent dir's
     /// settings.json on every run — the same live read the kernel-side

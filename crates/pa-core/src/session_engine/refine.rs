@@ -84,6 +84,15 @@ Reviewer instructions: {instructions}"
     )
 }
 
+/// The refusal for a global refinement the model asked for: global stores
+/// change only on the user's say-so.
+pub(crate) const GLOBAL_REFINEMENT_NEEDS_USER_ERROR: &str =
+    "global refinements need the user: ask them to run /refine --global";
+
+/// The refusal for a global refinement requested in a child session.
+pub(crate) const CHILD_GLOBAL_REFINEMENT_ERROR: &str =
+    "child sessions write local harness entries only; ask the lead or the user to promote";
+
 /// Who triggered a refinement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefinementSource {
@@ -300,6 +309,7 @@ pub async fn execute_refinement(
     refine_call: crate::refinement::executor::RefinerFn,
     agent_dir: Option<&Path>,
 ) -> anyhow::Result<RefinementResult> {
+    ensure_global_refinement_allowed(options, source)?;
     let ready = prepare_refinement(
         session,
         agent_dir,
@@ -356,6 +366,7 @@ pub(crate) async fn run_refinement(
     refine_call: crate::refinement::executor::RefinerFn,
     global_harness_dir: PathBuf,
 ) -> anyhow::Result<CommittedRefinement> {
+    ensure_global_refinement_allowed(&options, source)?;
     let _flight = RefinementFlightGuard::enter(refinements_in_flight);
     let ready = pa_agent::abort::race_with_abort(
         async {
@@ -393,6 +404,23 @@ pub(crate) async fn run_refinement(
         &cancel,
     )
     .await
+}
+
+/// Refuses a global refinement the user did not ask for, before any
+/// planning request is spent on it.
+fn ensure_global_refinement_allowed(
+    options: &RefineOptions,
+    source: RefinementSource,
+) -> anyhow::Result<()> {
+    if !options.global {
+        return Ok(());
+    }
+    match source {
+        RefinementSource::User => Ok(()),
+        RefinementSource::Auto | RefinementSource::SelfRefine => {
+            anyhow::bail!(GLOBAL_REFINEMENT_NEEDS_USER_ERROR)
+        }
+    }
 }
 
 /// An ephemeral plan: no persistence or run reservation is held while planning.
@@ -1721,7 +1749,7 @@ Reviewer instructions: record it"
                 global: true,
                 ..Default::default()
             },
-            RefinementSource::SelfRefine,
+            RefinementSource::User,
             seam(reply),
             None,
         )
@@ -1760,6 +1788,38 @@ Reviewer instructions: record it"
         assert!(
             !global_state.entries[&crate::refinement::RefinementKind::Memory].contains_key("g1")
         );
+    }
+
+    #[tokio::test]
+    async fn model_requested_global_refinement_is_refused_before_planning() {
+        let dir = TempDir::new().unwrap();
+        let session = tokio::sync::Mutex::new(persisted_session(&dir));
+        let agent = Arc::new(Agent::new(AgentOptions::default()));
+        let global_dir = dir.path().join("harness");
+        let error = execute_refinement(
+            &session,
+            &agent,
+            RefinementTranscript {
+                messages: &[user_message("x")],
+                refinement_history: &[],
+            },
+            &global_dir,
+            &test_model(),
+            &RefineOptions {
+                global: true,
+                ..Default::default()
+            },
+            RefinementSource::SelfRefine,
+            Box::new(|_, _, _| panic!("a refused refinement must not call the planner")),
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "global refinements need the user: ask them to run /refine --global"
+        );
+        assert!(!global_dir.exists());
     }
 
     async fn run_global_refine(
