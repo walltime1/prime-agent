@@ -347,13 +347,13 @@ impl Worker {
             return response;
         }
         if let Some(engine) = &self.agent_engine {
-            let engine = std::sync::Arc::clone(engine);
+            let live_engine = std::sync::Arc::clone(engine);
             // The blocking thread's reload can fail two ways: the auth
             // store's reload (a malformed document, an unacquirable lock)
             // or the join itself (a panic). Both answer the client's
             // reload with the failure, never a success the session did
             // not apply.
-            match tokio::task::spawn_blocking(move || engine.reload_live_inputs()).await {
+            match tokio::task::spawn_blocking(move || live_engine.reload_live_inputs()).await {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
                     return response_failure(
@@ -370,6 +370,48 @@ impl Worker {
                         &format!("session reload failed: {error}"),
                         None,
                     );
+                }
+            }
+            // `/workspace` rewrites the session's workspace record, then reloads: a built
+            // session still on the old store is rebuilt in place, so the refine target, the
+            // digest, and the kernel env all follow the switch.
+            let built = engine.session.lock().await.clone();
+            let session_path = self
+                .core
+                .lock()
+                .unwrap()
+                .store
+                .as_ref()
+                .map(|store| store.path.clone());
+            if let (Some(built), Some(session_path)) = (built, session_path) {
+                let recorded = pa_types::workspace::session_artifact_dir_for_log(&session_path)
+                    .and_then(|dir| pa_types::workspace::read_session_workspace_record(&dir));
+                if let Some(workspace) = recorded {
+                    let wanted = match pa_core::refinement::resolve_harness_state_dir(
+                        &self.config.agent_dir,
+                        workspace.as_deref(),
+                    ) {
+                        Ok(dir) => dir,
+                        Err(error) => {
+                            return response_failure(
+                                None,
+                                "reload",
+                                &format!("session reload failed: {error:#}"),
+                                None,
+                            );
+                        }
+                    };
+                    if wanted != built.harness_write_dir {
+                        drop(built);
+                        let rebuilt = self
+                            .handle_switch_session(
+                                &serde_json::json!({ "sessionPath": session_path }),
+                            )
+                            .await;
+                        if !rebuilt.success {
+                            return rebuilt;
+                        }
+                    }
                 }
             }
         }
@@ -1212,5 +1254,74 @@ mod tests {
             .await;
         assert!(response.success, "failed: {response:?}");
         assert!(response.data.is_none());
+    }
+
+    /// `/workspace` rewrites the session's workspace record and reloads: the built session is
+    /// rebuilt onto the newly pinned store instead of keeping the old one until restart.
+    #[allow(clippy::await_holding_lock)] // the faux registry is process-global: the guard must span the async flow
+    #[tokio::test]
+    async fn reload_after_a_workspace_switch_rebuilds_the_session_onto_the_new_store() {
+        let _faux = crate::agent_engine::tests::FAUX_TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = tempfile::TempDir::new().unwrap();
+        let sessions = dir.path().join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let agent_dir = dir.path().join("agent");
+        let worker = Arc::new(crate::worker::Worker::new(
+            crate::worker::WorkerConfig {
+                socket_path: dir.path().join("worker.sock"),
+                supervisor_socket_path: std::path::PathBuf::new(),
+                token: "token".to_string(),
+                worker_instance_id: String::new(),
+                active_session_id: "workspace-switch".to_string(),
+                agent_dir: agent_dir.clone(),
+                recovery_journal_path: dir.path().join("recovery.jsonl"),
+                telemetry_disabled: Some(true),
+                script: Some(json!({ "engine": "faux", "responses": [] })),
+            },
+            None,
+        ));
+        let created = worker
+            .dispatch("create", &json!({ "cwd": "/tmp", "sessionDir": sessions }))
+            .await;
+        assert!(created.success, "{created:?}");
+        let engine = Arc::clone(worker.agent_engine.as_ref().expect("faux agent engine"));
+        let built_store = || async {
+            let model = engine.session_model().unwrap();
+            engine.ensure_core_session_async(&model).await.unwrap();
+            engine
+                .session
+                .lock()
+                .await
+                .clone()
+                .expect("built session")
+                .harness_write_dir
+                .clone()
+        };
+        assert_eq!(
+            built_store().await,
+            pa_core::refinement::get_global_harness_state_dir(&agent_dir)
+        );
+        let session_path = worker
+            .core
+            .lock()
+            .unwrap()
+            .store
+            .as_ref()
+            .map(|store| store.path.clone())
+            .expect("persisted session");
+        let artifact_dir =
+            pa_types::workspace::session_artifact_dir_for_log(&session_path).unwrap();
+        std::fs::create_dir_all(&artifact_dir).unwrap();
+        pa_types::workspace::write_session_workspace(&artifact_dir, Some("demo")).unwrap();
+        let reloaded = worker
+            .dispatch("reload", &json!({ "activeSessionId": "workspace-switch" }))
+            .await;
+        assert!(reloaded.success, "{reloaded:?}");
+        assert_eq!(
+            built_store().await,
+            pa_core::refinement::get_workspace_harness_state_dir(&agent_dir, "demo").unwrap()
+        );
     }
 }

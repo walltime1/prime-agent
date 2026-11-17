@@ -94,7 +94,6 @@ impl AgentSessionEngine {
             return Ok(None);
         };
         let (model, api_key) = self.resolve_request_target(model);
-        let global_harness_dir = self.config.agent_dir.clone();
         // The lock covers the clone only (see `run_compaction`): holding the
         // session mutex across the review serialized every client read seam
         // behind it. The cloned engine keeps the round alive across a rebuild.
@@ -111,7 +110,7 @@ impl AgentSessionEngine {
                 .consume_compact_auto_refine(
                     &model,
                     api_key,
-                    global_harness_dir,
+                    engine.harness_write_dir.clone(),
                     CompactAutoRefineSurface::Checkpoint,
                 )
                 .await
@@ -496,6 +495,37 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn global_refine_session_command_writes_the_store_the_digest_reads() {
+        let _faux = FAUX_TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let reply = r#"{"summary":"one edit","edits":[{"action":"create","kind":"memory","id":"m1","title":"t","content":"c"}]}"#;
+        let (engine, _dir) = trigger_engine(&json!({ "responses": [{"text": reply}] }), 1, true);
+        let (send, receive) = std::sync::mpsc::channel();
+        *engine.refinement_completion_sink.lock().unwrap() =
+            Some(std::sync::Arc::new(move |pending| {
+                send.send(pending).unwrap();
+            }));
+        let command = pa_core::session_engine::slash_commands::parse_session_command(
+            &pa_core::session_engine::slash_commands::SlashCommandRegistry::builtin(),
+            "/refine --global",
+        )
+        .expect("the test text is a session command");
+        let execution =
+            crate::session_commands::run_session_command(&engine, &command, &[], &mut |_| true)
+                .expect("slash command returns after scheduling");
+        assert!(execution.error.is_none());
+        let pending = receive
+            .try_recv()
+            .expect("completion handed to background sink");
+        engine.runtime.block_on(pending).unwrap().unwrap();
+        let agent_dir = &engine.config.agent_dir;
+        let global_dir = pa_core::refinement::get_global_harness_state_dir(agent_dir);
+        assert!(pa_core::refinement::get_harness_state_path(&global_dir).is_file());
+        assert!(!pa_core::refinement::get_harness_state_path(agent_dir).exists());
     }
 
     fn refine_command() -> pa_core::session_engine::slash_commands::SessionSlashCommand {

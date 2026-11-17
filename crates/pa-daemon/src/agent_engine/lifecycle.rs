@@ -796,12 +796,6 @@ impl AgentSessionEngine {
         self.ensure_core_session(&model)?;
         let (model, api_key) = self.resolve_request_target(model);
         let mut autonomous = self.autonomous.blocking_lock();
-        let mut params = SessionCommandParams {
-            model: &model,
-            api_key,
-            global_harness_dir: self.config.agent_dir.clone(),
-            autonomous: &mut autonomous,
-        };
         // The lock covers the clone only: the command below can run a summarizer call, so the
         // mutex must not ride it.
         let core = self
@@ -809,6 +803,12 @@ impl AgentSessionEngine {
             .blocking_lock()
             .clone()
             .expect("session built by ensure_core_session");
+        let mut params = SessionCommandParams {
+            model: &model,
+            api_key,
+            global_harness_dir: core.harness_write_dir.clone(),
+            autonomous: &mut autonomous,
+        };
         Ok(self
             .runtime
             .block_on(async { execute_session_command(&core, &mut params, command, images).await }))

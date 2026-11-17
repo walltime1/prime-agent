@@ -1243,13 +1243,13 @@ impl SessionEngine for AgentSessionEngine {
         let model = self.resolve_model()?;
         self.ensure_core_session(&model)?;
         let (model, api_key) = self.resolve_request_target(model);
-        let global_harness_dir = self.config.agent_dir.clone();
         // The lock covers the clone only; the model call below must not ride it.
         let core = self
             .session
             .blocking_lock()
             .clone()
             .expect("session built by ensure_core_session");
+        let global_harness_dir = core.harness_write_dir.clone();
         let committed = self.runtime.block_on(async {
             let pending = core.session.start_refinement(
                 options,
