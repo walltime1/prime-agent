@@ -112,7 +112,6 @@ fn cached_prefix_is_stable_across_sessions() {
     );
 
     let first_tail = &first.assembled[first.cached_prefix_len..];
-    assert!(first_tail.contains("Current date: "));
     assert!(first_tail.contains("Working directory: /first/cwd"));
     assert!(first_tail.contains("Recursive agent depth: 0 (root)"));
     assert!(first_tail.contains("<available_skills>"));

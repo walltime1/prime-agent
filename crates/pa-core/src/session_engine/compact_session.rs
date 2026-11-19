@@ -71,6 +71,7 @@ fn message_from_entry(entry: &FileEntry) -> Option<AgentMessage> {
         FileEntry::CustomMessage { payload, .. } => {
             if payload.custom_type == "harness_digest"
                 || payload.custom_type == super::ipython_state::IPYTHON_STATE_CUSTOM_TYPE
+                || payload.custom_type == super::time_context::TIME_CONTEXT_CUSTOM_TYPE
             {
                 return None;
             }

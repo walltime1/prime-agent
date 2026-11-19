@@ -1,0 +1,1 @@
+- The model now gets the current time and the time since the previous message at the start of a turn (at most once every 10 minutes), so it can tell a quick reply from a return after hours or days.

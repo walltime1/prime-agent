@@ -44,6 +44,7 @@ impl AgentSession {
             prompt_messages.push(digest_row);
         }
         prompt_messages.extend(self.take_next_turn_rows().await);
+        prompt_messages.extend(self.due_time_context_row().await);
         let custom_row = session_message_to_loop(&SessionAgentMessage::Custom(message.clone()))
             .ok_or_else(|| anyhow::anyhow!("injected custom message conversion failed"))?;
         // The dispatch-time routing fires for every dispatched turn; injected
@@ -143,6 +144,7 @@ impl AgentSession {
                 prompt_messages.push(digest_row);
             }
             prompt_messages.extend(self.take_next_turn_rows().await);
+            prompt_messages.extend(self.due_time_context_row().await);
             prompt_messages.push(user_prompt_message(&normalized, &images));
             // Each batched action contributes its user row after the
             // primary, through the same admission normalization (TS
@@ -232,6 +234,17 @@ impl AgentSession {
             next.extend(own_rows);
         }
         self.pending_next_turn_rows = shared;
+    }
+
+    /// The turn clock row when one is due (see `time_context`), counted as
+    /// `time_context_count` on `agent session ended`.
+    async fn due_time_context_row(&self) -> Option<pa_agent::types::AgentMessage> {
+        let messages = self.agent.state().await.messages;
+        let row = super::time_context::due_time_context_row(&messages, super::now_millis())?;
+        if let Some(telemetry) = &self.skill_telemetry {
+            telemetry.note_time_context_injected();
+        }
+        Some(row)
     }
 
     /// Drain the queued next-turn rows: the admitting turn owns them; an

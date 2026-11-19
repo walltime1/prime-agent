@@ -683,6 +683,7 @@ const AGENT_SESSION_ENDED: EventRule = EventRule {
         ("failover_count", optional(count())),
         ("model_error_count", optional(count())),
         ("skill_use_count", optional(count())),
+        ("time_context_count", optional(count())),
         ("mcp_connector_use_count", optional(count())),
         ("kernel_bootstrap_count", optional(count())),
         ("kernel_bootstrap_cold_count", optional(count())),

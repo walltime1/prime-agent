@@ -1145,8 +1145,8 @@ fn provider_failure_recovered_by_retry_settles_the_turn() {
     };
     assert_eq!(
         roles_of(agent_ends[0]),
-        ["custom", "user", "assistant"],
-        "the initial run's message set (the deferred harness digest rides first): {agent_ends:?}"
+        ["custom", "custom", "user", "assistant"],
+        "the initial run's message set (the deferred harness digest, then the turn clock): {agent_ends:?}"
     );
     assert_eq!(
         agent_ends[0]["messages"][0]["customType"],
@@ -1154,7 +1154,12 @@ fn provider_failure_recovered_by_retry_settles_the_turn() {
         "the deferred digest row is the run's first message"
     );
     assert_eq!(
-        agent_ends[0]["messages"][2]["stopReason"],
+        agent_ends[0]["messages"][1]["customType"],
+        json!("time_context"),
+        "the turn clock row follows the digest"
+    );
+    assert_eq!(
+        agent_ends[0]["messages"][3]["stopReason"],
         json!("error"),
         "the initial run ends on the error row"
     );

@@ -418,11 +418,11 @@ async fn a_retried_turn_broadcasts_one_agent_end_per_run() {
     let first = &events[agent_ends[0]];
     assert_eq!(
         roles_of(first),
-        ["custom", "user", "assistant"],
-        "the failed run's message set (the deferred digest rides first): {events:?}"
+        ["custom", "custom", "user", "assistant"],
+        "the failed run's message set (the deferred digest, then the turn clock): {events:?}"
     );
     assert_eq!(
-        first["messages"][2]["stopReason"],
+        first["messages"][3]["stopReason"],
         json!("error"),
         "the failed run ends on the error row"
     );

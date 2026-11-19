@@ -494,7 +494,7 @@ async fn prompt_rides_digest_row_into_the_run() {
         .iter()
         .map(pa_agent::types::AgentMessage::role)
         .collect();
-    assert_eq!(roles, vec!["custom", "user", "assistant"]);
+    assert_eq!(roles, vec!["custom", "custom", "user", "assistant"]);
     let AgentMessage::Custom(custom) = &end_messages[0] else {
         panic!("expected digest custom row");
     };
@@ -512,6 +512,8 @@ async fn prompt_rides_digest_row_into_the_run() {
             "turn_start",
             "custom",
             "custom",
+            "custom",
+            "custom",
             "user",
             "user",
             "assistant",
@@ -524,7 +526,8 @@ async fn prompt_rides_digest_row_into_the_run() {
     let calls = provider.calls();
     assert_eq!(calls.len(), 1);
     assert!(user_text(&calls[0].messages[0]).contains("[harness-digest]"));
-    assert_eq!(user_text(&calls[0].messages[1]), "hi there");
+    assert!(user_text(&calls[0].messages[1]).starts_with("[time-context]"));
+    assert_eq!(user_text(&calls[0].messages[2]), "hi there");
 
     // The digest persisted exactly once (the loop's message_end), ahead
     // of the user row.
@@ -582,6 +585,47 @@ async fn prompt_rides_digest_row_into_the_run() {
 /// turn (the custom row, appended once), never a duplicate user
 /// message.
 #[tokio::test]
+async fn an_admitted_turn_carries_the_clock_row_once_per_interval() {
+    let provider = Arc::new(ScriptedProvider::new(test_model()));
+    provider.push_text_turn("first");
+    provider.push_text_turn("second");
+    let (session, _tmp) = digest_session(Arc::clone(&provider)).await;
+    for text in ["one", "two"] {
+        session
+            .prompt(text, PromptOptions::default())
+            .await
+            .unwrap();
+        session.agent().wait_for_idle().await;
+    }
+    let clock_texts = |call: &pa_agent::stream::LlmContext| -> Vec<String> {
+        call.messages
+            .iter()
+            .filter(|message| matches!(message, pa_agent::types::Message::User(_)))
+            .map(user_text)
+            .filter(|text| text.starts_with("[time-context]"))
+            .collect()
+    };
+    let calls = provider.calls();
+    assert_eq!(calls.len(), 2);
+    let first_users: Vec<String> = calls[0]
+        .messages
+        .iter()
+        .filter(|message| matches!(message, pa_agent::types::Message::User(_)))
+        .map(user_text)
+        .collect();
+    assert_eq!(first_users.last().map(String::as_str), Some("one"));
+    assert!(
+        first_users[first_users.len() - 2].starts_with("[time-context]"),
+        "the clock row rides ahead of the prompt: {first_users:?}"
+    );
+    assert_eq!(
+        clock_texts(&calls[1]).len(),
+        1,
+        "a turn inside the interval adds no second clock row"
+    );
+}
+
+#[tokio::test]
 async fn prompt_injected_message_persists_one_custom_row() {
     let provider = Arc::new(ScriptedProvider::new(test_model()));
     provider.push_text_turn("notice acknowledged");
@@ -604,8 +648,8 @@ async fn prompt_injected_message_persists_one_custom_row() {
 
     // The provider request carries the notice text as its user-role
     // view — once, with no duplicate user message. The first-turn
-    // harness digest rides ahead of it, exactly like a plain prompt's
-    // request.
+    // harness digest and the turn clock ride ahead of it, exactly like a
+    // plain prompt's request.
     let calls = provider.calls();
     assert_eq!(calls.len(), 1);
     let user_texts: Vec<String> = calls[0]
@@ -614,8 +658,8 @@ async fn prompt_injected_message_persists_one_custom_row() {
         .filter(|message| matches!(message, pa_agent::types::Message::User(_)))
         .map(user_text)
         .collect();
-    assert_eq!(user_texts.len(), 2, "digest plus notice: {calls:?}");
-    assert_eq!(user_texts[1], notice_text);
+    assert_eq!(user_texts.len(), 3, "digest, clock, and notice: {calls:?}");
+    assert_eq!(user_texts[2], notice_text);
     assert_eq!(
         user_texts
             .iter()
@@ -712,6 +756,15 @@ fn normalized_context(context: &pa_agent::stream::LlmContext) -> serde_json::Val
     for message in value["messages"].as_array_mut().unwrap() {
         if let Some(timestamp) = message.get_mut("timestamp") {
             *timestamp = serde_json::json!(0);
+        }
+        // The turn clock samples the wall time, so two runs can differ by a second.
+        if let Some(text) = message.pointer_mut("/content/0/text") {
+            if text
+                .as_str()
+                .is_some_and(|text| text.starts_with("[time-context]"))
+            {
+                *text = serde_json::json!("[time-context]");
+            }
         }
     }
     value

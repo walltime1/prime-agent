@@ -318,6 +318,7 @@ pub struct SessionCounters {
 #[derive(Default)]
 struct CounterValues {
     skill_use_count: u64,
+    time_context_count: u64,
     mcp_connector_use_count: u64,
     kernel_bootstrap_count: u64,
     kernel_bootstrap_cold_count: u64,
@@ -379,6 +380,7 @@ impl SessionCounters {
         self.with(|values| {
             for (key, value) in [
                 ("skill_use_count", values.skill_use_count),
+                ("time_context_count", values.time_context_count),
                 ("mcp_connector_use_count", values.mcp_connector_use_count),
                 ("kernel_bootstrap_count", values.kernel_bootstrap_count),
                 (
@@ -681,6 +683,12 @@ impl SessionTelemetry {
     /// uploads.
     pub fn note_skill_used(&self) {
         self.counters.with(|values| values.skill_use_count += 1);
+    }
+
+    /// One turn clock row rode an admitted turn (the `time_context` seam),
+    /// counted as `time_context_count` on `agent session ended`.
+    pub fn note_time_context_injected(&self) {
+        self.counters.with(|values| values.time_context_count += 1);
     }
 
     /// One durable child-usage attribution row landed in the parent
