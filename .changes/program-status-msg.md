@@ -1,0 +1,1 @@
+- OSC 7501 status reports now carry the session's name as their message, so a terminal's inbox shows which session is working, done, or failed; the agents view reports "Choosing a session".

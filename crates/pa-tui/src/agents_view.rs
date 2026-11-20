@@ -1290,7 +1290,10 @@ async fn run_agents_view_surface(
         }
         // OSC 7501 program status: the picker waits on the user's choice.
         if matches!(renderer, Renderer::Terminal { .. }) {
-            crate::program_status::report(crate::program_status::Status::Idle);
+            crate::program_status::report(
+                crate::program_status::Status::Idle,
+                "Choosing a session",
+            );
         }
         // A failed saved-catalog fetch re-arms on the next query change or deferred shell open
         // (a key, a paste, or a click): one honest retry behind a terminal failure.

@@ -62,11 +62,12 @@ const PROGRAM_STATUS_ANSWER: &[u8] =
     b"\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\x1b\\";
 /// Every OSC 7501 report's head.
 const STATUS_REPORT: &[u8] = b"\x1b]7501;state=";
-/// The OSC 7501 reports the chat surface writes while a turn runs and rests.
-const STATUS_WORKING: &[u8] = b"\x1b]7501;state=working:app=prime-agent\x1b\\";
-const STATUS_DONE: &[u8] = b"\x1b]7501;state=done:app=prime-agent\x1b\\";
-const STATUS_IDLE: &[u8] = b"\x1b]7501;state=idle:app=prime-agent\x1b\\";
-const STATUS_ERROR: &[u8] = b"\x1b]7501;state=error:app=prime-agent\x1b\\";
+/// The heads of the OSC 7501 reports the chat surface writes while a turn
+/// runs and rests, each naming the session in its `msg`.
+const STATUS_WORKING: &[u8] = b"\x1b]7501;state=working:app=prime-agent:msg=";
+const STATUS_DONE: &[u8] = b"\x1b]7501;state=done:app=prime-agent:msg=";
+const STATUS_IDLE: &[u8] = b"\x1b]7501;state=idle:app=prime-agent:msg=";
+const STATUS_ERROR: &[u8] = b"\x1b]7501;state=error:app=prime-agent:msg=";
 
 /// The child-mode env: which surface this re-executed binary runs.
 const CHILD_MODE_ENV: &str = "PA_DIFF_CHILD_MODE";
