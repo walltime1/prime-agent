@@ -175,8 +175,11 @@ fn a_reply_cut_off_at_the_output_limit_retries_on_any_turn() {
     assert_eq!(events.last(), Some(&EngineEvent::Done(Ok(()))));
 }
 
+/// A reasoning-only stop right after a tool result never reaches the retry
+/// driver: the agent loop nudges it once with a changed prompt, because an
+/// identical resend stalls again under exact sampling.
 #[test]
-fn a_retry_after_tool_work_resumes_without_rerunning_the_tool() {
+fn a_stall_after_tool_work_is_nudged_without_rerunning_the_tool() {
     let events = run_request(
         &json!({"engine": "faux", "responses": [
             {"content": [{"type": "toolCall", "id": "call-1", "name": "synthetic_missing_tool", "arguments": {}}]},
@@ -190,12 +193,20 @@ fn a_retry_after_tool_work_resumes_without_rerunning_the_tool() {
         .iter()
         .filter(|event| matches!(event, EngineEvent::ToolExecutionStart { .. }))
         .count();
-    assert_eq!(tool_runs, 1, "the retry re-issues only the failed reply");
+    assert_eq!(tool_runs, 1, "the nudge re-issues only the stalled reply");
+    let nudges = events
+        .iter()
+        .filter(|event| {
+            matches!(event, EngineEvent::UserMessage(message)
+                if message["content"] == "Continue: make the tool call you planned.")
+        })
+        .count();
+    assert_eq!(nudges, 1, "the loop nudges the stall exactly once");
     assert_eq!(
         text_of(assistant_rows(&events).last().unwrap()),
         "The task is complete."
     );
-    assert_eq!(retry_events(&events), (1, vec![true]));
+    assert_eq!(retry_events(&events), (0, vec![]));
     assert_eq!(events.last(), Some(&EngineEvent::Done(Ok(()))));
 }
 
