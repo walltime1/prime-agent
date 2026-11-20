@@ -284,7 +284,8 @@ pub trait InteractionTelemetry: Send + Sync {
         scoped: bool,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
     /// An agents-view action ran (`tui agents action`): `action` is `program_shown` (the ctrl+o
-    /// toggle turned a spawn program on) or `renamed` — primitives only.
+    /// toggle turned a spawn program on), `renamed`, `starred` (ctrl+p starred a session), or
+    /// `starred_filter` (ctrl+s listed only starred sessions) — primitives only.
     fn agents_view_action(
         &self,
         action: &'static str,

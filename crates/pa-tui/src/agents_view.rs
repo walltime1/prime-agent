@@ -52,6 +52,7 @@ pub(crate) use delete::{execute_delete_action, DeleteAction};
 use delete::{spawn_delete_dispatch, PendingDelete};
 
 mod rename;
+mod stars;
 use rename::{spawn_rename_dispatch, Rename};
 
 mod reply;
@@ -179,7 +180,8 @@ pub struct AgentsViewOutcome {
     pub status_message: Option<String>,
     /// The panel the opened session mounts (an activity line's or a persistent shell row's open).
     pub panel: Option<SessionPanel>,
-    /// The view actions this run performed (`program_shown`, `renamed`): the composition root
+    /// The view actions this run performed (`program_shown`, `renamed`, `starred`,
+    /// `starred_filter`): the composition root
     /// emits the `tui agents action` adoption events at the run's end.
     pub actions: Vec<&'static str>,
     pub incident_notice_state: crate::incident_notices::IncidentNoticeState,
@@ -370,6 +372,10 @@ struct AgentsViewMode {
     workspace_filter: Option<String>,
     /// Workspaces of the last built agent rows (sorted, global last): the ctrl+f cycle order.
     workspace_choices: Vec<String>,
+    /// The starred sessions (`app.agents.star`).
+    stars: stars::Stars,
+    /// The `app.agents.starred` filter: list only the starred sessions.
+    starred_only: bool,
     /// The status line: rendered at the bottom hint row in its tone, expired by the
     /// loop's deadline arm, sticky lines cleared by the next key.
     status: Option<Status>,
@@ -472,7 +478,8 @@ struct AgentsViewMode {
     /// The left press a release may fire: the pressed row and whether it turned into a drag —
     /// a dragged release never opens.
     pressed_click: Option<PressedMouseClick>,
-    /// The view actions this run performed (`program_shown`, `renamed`), reported on the outcome
+    /// The view actions this run performed (`program_shown`, `renamed`, `starred`,
+    /// `starred_filter`), reported on the outcome
     /// for the composition root's adoption events.
     actions: Vec<&'static str>,
     /// The daemon's heartbeat catalog (the dock's source, TS
@@ -520,6 +527,24 @@ impl AgentsViewMode {
             // and the timer, exactly like any later line.
             status => (status.as_deref().map(Status::transient), None),
         };
+        // Unit tests keep the stars in memory, so a test key press never writes the
+        // developer's store. An unreadable store is never overwritten: the in-memory
+        // fallback has no file to save to.
+        let stars_file = pa_types::platform::agent_dir()
+            .filter(|_| !cfg!(test))
+            .map(|dir| dir.join(stars::STARS_FILE));
+        let (stars, status) = match stars_file.map(stars::Stars::load) {
+            None => (stars::Stars::default(), status),
+            Some(Ok(stars)) => (stars, status),
+            Some(Err(error)) => (
+                stars::Stars::default(),
+                status.or_else(|| {
+                    Some(Status::transient(&format!(
+                        "Starred sessions unavailable: {error}"
+                    )))
+                }),
+            ),
+        };
         let pending_ancestors =
             (!options.expanded_ancestors.is_empty()).then(|| options.expanded_ancestors.clone());
         let selected_identity = options.selected_row_identity.clone();
@@ -562,6 +587,8 @@ impl AgentsViewMode {
             scope_dropped: false,
             workspace_filter: None,
             workspace_choices: Vec::new(),
+            stars,
+            starred_only: false,
             expanded_parents: std::collections::HashSet::default(),
             program_shown_parents: std::collections::HashSet::default(),
             pending_ancestors,

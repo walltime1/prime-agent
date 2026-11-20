@@ -392,6 +392,14 @@ pub const APP_KEYBINDINGS: &[(&str, KeybindingDefinition)] = &[
         def!(&["ctrl+r"], "Rename selected agent session"),
     ),
     (
+        "app.agents.star",
+        def!(&["ctrl+p"], "Star or unstar selected agent session"),
+    ),
+    (
+        "app.agents.starred",
+        def!(&["ctrl+s"], "Show only starred agent sessions"),
+    ),
+    (
         "app.agents.expand",
         def!(
             &["alt+right"],

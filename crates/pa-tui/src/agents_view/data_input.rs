@@ -87,20 +87,10 @@ impl AgentsViewMode {
         workspace_choices.dedup();
         self.workspace_choices = workspace_choices;
         if let Some(wanted) = self.workspace_filter.as_deref().filter(|_| !scope_active) {
-            let matching_parents: std::collections::HashSet<String> = rows
-                .iter()
-                .filter(|row| row.kind == RowKind::Agent && row.workspace == wanted)
-                .map(|row| row.identity.clone())
-                .collect();
-            rows.retain(|row| {
-                if row.kind == RowKind::Agent {
-                    matching_parents.contains(&row.identity)
-                } else {
-                    row.parent_identity
-                        .as_ref()
-                        .is_some_and(|parent| matching_parents.contains(parent))
-                }
-            });
+            retain_agent_trees(&mut rows, |row| row.workspace == wanted);
+        }
+        if self.starred_only && !scope_active {
+            retain_agent_trees(&mut rows, |row| self.is_starred(row));
         }
         // The entry anchor's row may be nested: add its ancestors to the expansion below so this
         // pass reveals it.
@@ -586,6 +576,17 @@ impl AgentsViewMode {
             self.set_status(&status);
             return;
         }
+        // `app.agents.star` (default ctrl+p) and `app.agents.starred` (default ctrl+s): Ctrl
+        // keys, since a macOS terminal without option-as-meta has no Alt; neither types
+        // search text, so both work while a query narrows the list.
+        if self.keybindings.matches(key, "app.agents.star") {
+            self.toggle_star_for_selected();
+            return;
+        }
+        if self.keybindings.matches(key, "app.agents.starred") {
+            self.toggle_starred_only();
+            return;
+        }
         // `app.agents.rename` (default ctrl+r, empty editor only, before the delete arm):
         // enter the rename composer.
         if !has_query && self.keybindings.matches(key, "app.agents.rename") {
@@ -918,4 +919,22 @@ fn truncate_trailing_word(query: &mut String) -> bool {
     }
     *query = chars[..start].iter().collect();
     true
+}
+
+/// Keep the top-level agent rows `keep` accepts, with every row nested under them.
+fn retain_agent_trees(rows: &mut Vec<AgentsViewRow>, keep: impl Fn(&AgentsViewRow) -> bool) {
+    let kept_parents: std::collections::HashSet<String> = rows
+        .iter()
+        .filter(|row| row.kind == RowKind::Agent && keep(row))
+        .map(|row| row.identity.clone())
+        .collect();
+    rows.retain(|row| {
+        if row.kind == RowKind::Agent {
+            kept_parents.contains(&row.identity)
+        } else {
+            row.parent_identity
+                .as_ref()
+                .is_some_and(|parent| kept_parents.contains(parent))
+        }
+    });
 }

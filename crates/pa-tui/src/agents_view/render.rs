@@ -60,6 +60,9 @@ impl AgentsViewMode {
                 format!("{summary}{filter_suffix}"),
             ));
         }
+        if self.starred_only {
+            extra_metadata.push(("filter".to_string(), "starred (ctrl+s: all)".to_string()));
+        }
         let theme = &self.theme;
         let chrome = crate::chrome::ChromeState {
             version: self.options.version.clone(),
@@ -594,6 +597,7 @@ impl AgentsViewMode {
         let icon = match row.section {
             _ if row.kind == RowKind::PersistentShell => "$",
             Section::Running => ["\u{25c7}", "\u{25c8}", "\u{25c6}", "\u{25c8}"][self.pulse % 4],
+            _ if self.is_starred(row) => "\u{2605}",
             _ => "\u{2022}",
         };
         let icon_color = match row.section {
@@ -871,6 +875,14 @@ impl AgentsViewMode {
             if let Some(keys) = all("app.agents.rename").filter(|_| self.rename_target().is_some())
             {
                 segments.push(format!("{keys} rename"));
+            }
+            if let Some(keys) = all("app.agents.star").filter(|_| self.star_target().is_some()) {
+                let starred = self
+                    .rows
+                    .get(self.selected)
+                    .is_some_and(|row| self.is_starred(row));
+                let word = if starred { "unstar" } else { "star" };
+                segments.push(format!("{keys} {word}"));
             }
             // The reply slot (the operator's completeness directive: TS shows none,
             // so the space arm would be undiscoverable): only while the selected row

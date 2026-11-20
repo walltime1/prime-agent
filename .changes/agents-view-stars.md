@@ -1,0 +1,1 @@
+- The agents view can star sessions: Ctrl+P stars or unstars the selected session (shown with ★ and kept across restarts), and Ctrl+S lists only the starred sessions.
