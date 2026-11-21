@@ -190,6 +190,16 @@ pub async fn execute_session_command(
         "refine" => execute_refine(engine, params, command, &mut execution),
         "goal" => execute_goal(engine, command, images, &mut execution).await,
         "autonomous" => execute_autonomous(params, command, &mut execution),
+        "agent-save" => execute_agent_save(engine, params, command, &mut execution).await,
+        "agent-list" => execute_agent_list(engine, command, &mut execution).await,
+        "workspace-info" => {
+            let agent_dir = engine.session.agent_dir.as_deref();
+            execute_workspace_info(agent_dir, params, command, &mut execution)
+        }
+        "workspace-promote" => {
+            let agent_dir = engine.session.agent_dir.as_deref();
+            execute_workspace_promote(agent_dir, params, command, &mut execution)
+        }
         other => Err(format!("Unknown session command: {other}")),
     };
     if let Err(message) = result {
@@ -419,6 +429,145 @@ fn execute_autonomous(
     Ok(())
 }
 
+/// `/agent save <name> [--force]`: write the session's workspace, cwd, model, thinking level and
+/// operating instructions as a launchable agent blueprint.
+async fn execute_agent_save(
+    engine: &SessionEngine,
+    params: &SessionCommandParams<'_>,
+    command: &SessionSlashCommand,
+    execution: &mut SessionCommandExecution,
+) -> Result<(), String> {
+    let usage = "Usage: /agent save <name> [--force]";
+    let words: Vec<&str> = command.args.split_whitespace().collect();
+    let (name, overwrite) = match words.as_slice() {
+        [name] => (*name, false),
+        [name, "--force"] | ["--force", name] => (*name, true),
+        _ => return Err(usage.to_string()),
+    };
+    let agent_dir = engine
+        .session
+        .agent_dir
+        .as_deref()
+        .ok_or("Cannot resolve the agent directory.")?;
+    let state = engine.session.agent().state().await;
+    let cwd = engine
+        .session
+        .session_handle()
+        .lock()
+        .await
+        .get_cwd()
+        .display()
+        .to_string();
+    let blueprint = crate::resources::blueprints::Blueprint {
+        name: name.to_string(),
+        description: None,
+        workspace: crate::refinement::workspace_for_harness_dir(
+            agent_dir,
+            &params.global_harness_dir,
+        ),
+        cwd: Some(cwd),
+        model: Some(format!("{}/{}", state.model.provider, state.model.id)),
+        thinking: Some(format!("{:?}", state.thinking_level).to_lowercase()),
+        skills: Vec::new(),
+        machine: None,
+        instructions: engine.append_system_prompt.clone(),
+    };
+    let path = crate::resources::blueprints::save_blueprint(agent_dir, &blueprint, overwrite)?;
+    let text = format!(
+        "Saved agent blueprint '{name}' to {}. Launch it with prime-agent --agent {name}.",
+        path.display()
+    );
+    execution.push_message(slash_command_result(
+        command, text, true, "info", None, true,
+    ));
+    Ok(())
+}
+
+/// `/agent list`: the blueprints launchable from here.
+async fn execute_agent_list(
+    engine: &SessionEngine,
+    command: &SessionSlashCommand,
+    execution: &mut SessionCommandExecution,
+) -> Result<(), String> {
+    let agent_dir = engine
+        .session
+        .agent_dir
+        .as_deref()
+        .ok_or("Cannot resolve the agent directory.")?;
+    let cwd = engine
+        .session
+        .session_handle()
+        .lock()
+        .await
+        .get_cwd()
+        .to_path_buf();
+    let text = crate::resources::blueprints::format_blueprint_list(&cwd, agent_dir);
+    execution.push_message(slash_command_result(
+        command, text, true, "info", None, true,
+    ));
+    Ok(())
+}
+
+/// The active workspace's agent dir and name: the session's store must be a workspace store.
+fn active_workspace<'a>(
+    agent_dir: Option<&'a std::path::Path>,
+    params: &SessionCommandParams<'_>,
+) -> Result<(&'a std::path::Path, String), String> {
+    let no_workspace = || "No active workspace: select one with /workspace <name>.".to_string();
+    let agent_dir = agent_dir.ok_or_else(no_workspace)?;
+    let name = crate::refinement::workspace_for_harness_dir(agent_dir, &params.global_harness_dir)
+        .ok_or_else(no_workspace)?;
+    Ok((agent_dir, name))
+}
+
+/// `/workspace info`: the workspace's harness entries as one result row.
+fn execute_workspace_info(
+    agent_dir: Option<&std::path::Path>,
+    params: &SessionCommandParams<'_>,
+    command: &SessionSlashCommand,
+    execution: &mut SessionCommandExecution,
+) -> Result<(), String> {
+    let (agent_dir, workspace) = active_workspace(agent_dir, params)?;
+    let text = crate::refinement::promotion::format_workspace_info(
+        agent_dir,
+        &workspace,
+        super::refine::now_millis(),
+    )
+    .map_err(|error| error.to_string())?;
+    execution.push_message(slash_command_result(
+        command, text, true, "info", None, true,
+    ));
+    Ok(())
+}
+
+/// `/workspace promote <id>`: move one workspace entry into the global store.
+fn execute_workspace_promote(
+    agent_dir: Option<&std::path::Path>,
+    params: &SessionCommandParams<'_>,
+    command: &SessionSlashCommand,
+    execution: &mut SessionCommandExecution,
+) -> Result<(), String> {
+    let entry_id = command.args.trim();
+    if entry_id.is_empty() || entry_id.contains(char::is_whitespace) {
+        return Err("Usage: /workspace promote <id>".to_string());
+    }
+    let (agent_dir, workspace) = active_workspace(agent_dir, params)?;
+    let promotion =
+        crate::refinement::promotion::promote_workspace_entry(agent_dir, &workspace, entry_id)
+            .map_err(|error| error.to_string())?;
+    let text = format!(
+        "Promoted {} {entry_id} from workspace '{workspace}' to global. Roll back with \
+         /refine --global rollback {} (global) and /refine --global rollback {} (workspace).",
+        crate::refinement::planner::kind_name(promotion.kind),
+        promotion.global_refinement_id,
+        promotion.workspace_refinement_id,
+    );
+    execution.push_message(slash_command_result(
+        command, text, true, "info", None, true,
+    ));
+    Ok(())
+}
+
 /// The rows are durable in the session's own entry chain: the live context
 /// rebuild and a later `/compact` see the same rows the host runtime persists.
 async fn persist_rows<'a>(
@@ -544,6 +693,82 @@ mod tests {
         assert_eq!(status.custom_type, "autonomous_status");
         assert!(message_text(status).starts_with("[autonomous-status: on]"));
         assert!(matches!(status.content, UserContent::Text(_)));
+    }
+
+    #[test]
+    fn workspace_promote_moves_the_entry_and_info_lists_the_rest() {
+        use crate::refinement::{
+            empty_harness_state, get_workspace_harness_state_dir, load_harness_state,
+            save_harness_state, HarnessEntry, HarnessScope, RefinementKind,
+        };
+        let agent_dir = tempfile::tempdir().unwrap();
+        let workspace_dir = get_workspace_harness_state_dir(agent_dir.path(), "proj").unwrap();
+        let entry = |id: &str| HarnessEntry {
+            id: id.to_string(),
+            kind: RefinementKind::Memory,
+            title: id.to_uppercase(),
+            content: "content".to_string(),
+            path: "general".to_string(),
+            scope: Some(HarnessScope::Global),
+            reference: serde_json::Map::new(),
+            arguments: serde_json::Map::new(),
+            metadata: serde_json::Map::new(),
+            source: "user".to_string(),
+            created_at: "2026-11-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-11-01T00:00:00.000Z".to_string(),
+            version: 1,
+        };
+        let mut state = empty_harness_state();
+        for id in ["a", "b"] {
+            state
+                .entries
+                .get_mut(&RefinementKind::Memory)
+                .unwrap()
+                .insert(id.to_string(), entry(id));
+        }
+        save_harness_state(&workspace_dir, &state).unwrap();
+        let model = scripted_model();
+        let mut autonomous = crate::autonomous::create_autonomous_runtime_state(None, None);
+        let mut params = SessionCommandParams {
+            model: &model,
+            api_key: None,
+            global_harness_dir: workspace_dir,
+            autonomous: &mut autonomous,
+        };
+        let mut execution = SessionCommandExecution::default();
+        execute_workspace_promote(
+            Some(agent_dir.path()),
+            &params,
+            &command("workspace-promote", "a"),
+            &mut execution,
+        )
+        .unwrap();
+        execute_workspace_info(
+            Some(agent_dir.path()),
+            &params,
+            &command("workspace-info", ""),
+            &mut execution,
+        )
+        .unwrap();
+        let texts: Vec<String> = execution.messages.iter().map(message_text).collect();
+        assert!(texts[0].starts_with("Promoted memory a from workspace 'proj' to global."));
+        assert_eq!(
+            texts[1],
+            "Workspace 'proj': 1 harness entries\n- memory b: B"
+        );
+        let global = load_harness_state(&agent_dir.path().join("harness"), HarnessScope::Global);
+        assert!(global.entries[&RefinementKind::Memory].contains_key("a"));
+        params.global_harness_dir = agent_dir.path().join("harness");
+        let outside = execute_workspace_info(
+            Some(agent_dir.path()),
+            &params,
+            &command("workspace-info", ""),
+            &mut execution,
+        );
+        assert_eq!(
+            outside.unwrap_err(),
+            "No active workspace: select one with /workspace <name>."
+        );
     }
 
     fn scripted_model() -> pa_types::ai::Model {

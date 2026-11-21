@@ -3,6 +3,8 @@
 //! sources, resolved from configured packages, settings, auto-discovery,
 //! and bundled skills through the package manager. Theme loading lives in pa-tui.
 
+pub mod blueprints;
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 

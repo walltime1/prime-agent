@@ -36,6 +36,14 @@ impl Stars {
         })
     }
 
+    pub(super) fn contains(&self, file: &str) -> bool {
+        self.files.contains(file)
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
+
     /// Star `file`, or unstar it when starred, and persist the set. Returns whether `file`
     /// is starred now; a failed write leaves the set unchanged.
     pub(super) fn toggle(&mut self, file: &str) -> std::io::Result<bool> {
@@ -86,7 +94,7 @@ pub(super) fn star_key(row: &AgentsViewRow) -> Option<String> {
 
 impl AgentsViewMode {
     pub(super) fn is_starred(&self, row: &AgentsViewRow) -> bool {
-        star_key(row).is_some_and(|file| self.stars.files.contains(&file))
+        star_key(row).is_some_and(|file| self.stars.contains(&file))
     }
 
     /// The selected row's star key: only a top-level agent with a session file stars.
@@ -120,7 +128,7 @@ impl AgentsViewMode {
     pub(super) fn toggle_starred_only(&mut self) {
         self.starred_only = !self.starred_only;
         self.rebuild_rows();
-        let status = match (self.starred_only, self.stars.files.is_empty()) {
+        let status = match (self.starred_only, self.stars.is_empty()) {
             (true, true) => "No starred sessions yet (ctrl+p stars the selected one)",
             (true, false) => {
                 self.actions.push("starred_filter");

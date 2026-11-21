@@ -5,7 +5,16 @@
 use std::collections::HashMap;
 
 /// Session-executed commands (their behavior lives in the session engine).
-pub const SESSION_SLASH_COMMAND_NAMES: [&str; 4] = ["compact", "refine", "goal", "autonomous"];
+pub const SESSION_SLASH_COMMAND_NAMES: [&str; 8] = [
+    "compact",
+    "refine",
+    "goal",
+    "autonomous",
+    "workspace-info",
+    "workspace-promote",
+    "agent-save",
+    "agent-list",
+];
 
 /// Durable row custom types (TS `messages.ts`): the command echo and its
 /// result, persisted in sessions and rendered by every surface.
@@ -72,13 +81,19 @@ const CANONICAL_BUILTIN_SLASH_COMMANDS: &[BuiltinSlashCommand] = &[
     BuiltinSlashCommand { name: "refine", description: "Refine continual harness prompt notes, skills, subagents, and memory", execution: SlashCommandExecution::Session, argument_hint: None, aliases: &[], takes_argument: false },
     BuiltinSlashCommand { name: "goal", description: "Set or view a persistent goal; supports pause, resume, and clear", execution: SlashCommandExecution::Session, argument_hint: Some("[objective]"), aliases: &[], takes_argument: true },
     BuiltinSlashCommand { name: "autonomous", description: "Set or view autonomous mode with an optional budget", execution: SlashCommandExecution::Session, argument_hint: Some("[status|off|on [--max-continuations <n>] [--max-turns <n>] [--max-tokens <n>] [--timeout-ms <n>] [--gate <command>]]"), aliases: &[], takes_argument: true },
+    BuiltinSlashCommand { name: "workspace-info", description: "List the active workspace's harness entries (the engine side of /workspace info)", execution: SlashCommandExecution::Session, argument_hint: None, aliases: &[], takes_argument: false },
+    BuiltinSlashCommand { name: "workspace-promote", description: "Move a workspace harness entry into the global store (the engine side of /workspace promote)", execution: SlashCommandExecution::Session, argument_hint: Some("<id>"), aliases: &[], takes_argument: true },
+    BuiltinSlashCommand { name: "agent-save", description: "Save this session as a launchable agent blueprint (the engine side of /agent save)", execution: SlashCommandExecution::Session, argument_hint: Some("<name> [--force]"), aliases: &[], takes_argument: true },
+    BuiltinSlashCommand { name: "agent-list", description: "List launchable agent blueprints (the engine side of /agent list)", execution: SlashCommandExecution::Session, argument_hint: None, aliases: &[], takes_argument: false },
+    BuiltinSlashCommand { name: "agent", description: "Save this session as an agent blueprint, or list blueprints (launch with prime-agent --agent <name>)", execution: SlashCommandExecution::Client, argument_hint: Some("save <name> [--force] | list"), aliases: &[], takes_argument: true },
+    BuiltinSlashCommand { name: "retire", description: "Refine this session into the active workspace (/refine --global), then archive it", execution: SlashCommandExecution::Client, argument_hint: None, aliases: &[], takes_argument: false },
     BuiltinSlashCommand { name: "rlm-max-depth", description: "Set/view the per-chat persistent RLM max depth immediately; never interrupts or queues the running turn", execution: SlashCommandExecution::Client, argument_hint: Some("[<int> [--global]]"), aliases: &[], takes_argument: true },
     BuiltinSlashCommand { name: "heartbeat", description: "Set or view a persistent heartbeat; delivery defaults to steer, use --follow-up to queue; supports pause, resume, stop, and clear", execution: SlashCommandExecution::Client, argument_hint: Some("[status|pause|resume|stop|[every <duration>] [--steer|--follow-up] <instruction>]"), aliases: &[], takes_argument: true },
     BuiltinSlashCommand { name: "heartbeats", description: "View and manage all user and agent heartbeats", execution: SlashCommandExecution::Client, argument_hint: None, aliases: &[], takes_argument: false },
     BuiltinSlashCommand { name: "factory", description: "Show or set the agent factory opt-in gate (off by default)", execution: SlashCommandExecution::Client, argument_hint: Some("[on|off|status]"), aliases: &[], takes_argument: true },
     BuiltinSlashCommand { name: "resume", description: "Open the agents view, or resume a session by id or path", execution: SlashCommandExecution::Client, argument_hint: Some("[id|path]"), aliases: &[], takes_argument: true },
     BuiltinSlashCommand { name: "reload", description: "Reload keybindings, skills, prompts, and themes", execution: SlashCommandExecution::Client, argument_hint: None, aliases: &[], takes_argument: false },
-    BuiltinSlashCommand { name: "workspace", description: "Show, list, select, or clear the active continual-harness workspace", execution: SlashCommandExecution::Client, argument_hint: Some("[name|off|list|delete <name>|rename <old> <new>]"), aliases: &[], takes_argument: true },
+    BuiltinSlashCommand { name: "workspace", description: "Show, list, select, or clear the active continual-harness workspace; info and promote inspect and share its harness entries", execution: SlashCommandExecution::Client, argument_hint: Some("[name|off|list|info|promote <id>|delete <name>|rename <old> <new>]"), aliases: &[], takes_argument: true },
     BuiltinSlashCommand { name: "speed", description: "Toggle footer readout of model output tok/sec (latest response and session average)", execution: SlashCommandExecution::Client, argument_hint: Some("[on|off]"), aliases: &[], takes_argument: true },
     BuiltinSlashCommand { name: "quit", description: "Quit Prime Agent", execution: SlashCommandExecution::Client, argument_hint: None, aliases: &[], takes_argument: false },
 ];

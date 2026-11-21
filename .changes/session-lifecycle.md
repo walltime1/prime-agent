@@ -1,0 +1,2 @@
+- The agents view can archive sessions: Ctrl+A archives or unarchives the selected top-level session, and Ctrl+E shows or hides the archived sessions (hidden by default, with a hollow circle on archived rows while shown).
+- `/workspace info` lists the active workspace's harness entries and flags those past their 90-day review, `/workspace promote <id>` moves a workspace harness entry into the global harness (rollbackable with `/refine rollback`), and `/retire` runs a global refinement and then archives the current session.

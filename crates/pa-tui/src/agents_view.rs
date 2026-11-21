@@ -51,6 +51,8 @@ use delete::no_effect_summary;
 pub(crate) use delete::{execute_delete_action, DeleteAction};
 use delete::{spawn_delete_dispatch, PendingDelete};
 
+mod archived;
+pub(crate) use archived::{archive_session_file, ARCHIVED_FILE};
 mod rename;
 mod stars;
 use rename::{spawn_rename_dispatch, Rename};
@@ -181,7 +183,7 @@ pub struct AgentsViewOutcome {
     /// The panel the opened session mounts (an activity line's or a persistent shell row's open).
     pub panel: Option<SessionPanel>,
     /// The view actions this run performed (`program_shown`, `renamed`, `starred`,
-    /// `starred_filter`): the composition root
+    /// `starred_filter`, `archived`, `archived_filter`): the composition root
     /// emits the `tui agents action` adoption events at the run's end.
     pub actions: Vec<&'static str>,
     pub incident_notice_state: crate::incident_notices::IncidentNoticeState,
@@ -376,6 +378,10 @@ struct AgentsViewMode {
     stars: stars::Stars,
     /// The `app.agents.starred` filter: list only the starred sessions.
     starred_only: bool,
+    /// The archived sessions (`app.agents.archive`).
+    archived: archived::ArchivedSessions,
+    /// The `app.agents.archived` toggle: list the archived sessions too (hidden by default).
+    show_archived: bool,
     /// The status line: rendered at the bottom hint row in its tone, expired by the
     /// loop's deadline arm, sticky lines cleared by the next key.
     status: Option<Status>,
@@ -479,7 +485,7 @@ struct AgentsViewMode {
     /// a dragged release never opens.
     pressed_click: Option<PressedMouseClick>,
     /// The view actions this run performed (`program_shown`, `renamed`, `starred`,
-    /// `starred_filter`), reported on the outcome
+    /// `starred_filter`, `archived`, `archived_filter`), reported on the outcome
     /// for the composition root's adoption events.
     actions: Vec<&'static str>,
     /// The daemon's heartbeat catalog (the dock's source, TS
@@ -545,6 +551,21 @@ impl AgentsViewMode {
                 }),
             ),
         };
+        let archived_file = pa_types::platform::agent_dir()
+            .filter(|_| !cfg!(test))
+            .map(|dir| dir.join(archived::ARCHIVED_FILE));
+        let (archived, status) = match archived_file.map(archived::ArchivedSessions::load) {
+            None => (archived::ArchivedSessions::default(), status),
+            Some(Ok(archived)) => (archived, status),
+            Some(Err(error)) => (
+                archived::ArchivedSessions::default(),
+                status.or_else(|| {
+                    Some(Status::transient(&format!(
+                        "Archived sessions unavailable: {error}"
+                    )))
+                }),
+            ),
+        };
         let pending_ancestors =
             (!options.expanded_ancestors.is_empty()).then(|| options.expanded_ancestors.clone());
         let selected_identity = options.selected_row_identity.clone();
@@ -589,6 +610,8 @@ impl AgentsViewMode {
             workspace_choices: Vec::new(),
             stars,
             starred_only: false,
+            archived,
+            show_archived: false,
             expanded_parents: std::collections::HashSet::default(),
             program_shown_parents: std::collections::HashSet::default(),
             pending_ancestors,

@@ -862,6 +862,25 @@ impl SessionUi {
                     );
                     return Ok(());
                 }
+                let words: Vec<&str> = arg.split_whitespace().collect();
+                // `info` and `promote` run in the session engine, which owns the harness stores.
+                match words.as_slice() {
+                    ["info"] => {
+                        return self.send_prompt("/workspace-info", SubmitBehavior::Steer, view);
+                    }
+                    ["promote", id] => {
+                        return self.send_prompt(
+                            &format!("/workspace-promote {id}"),
+                            SubmitBehavior::Steer,
+                            view,
+                        );
+                    }
+                    ["promote", ..] => {
+                        self.error_row("Usage: /workspace promote <id>", view);
+                        return Ok(());
+                    }
+                    _ => {}
+                }
                 if self.turn_active || view.working.is_some() || self.work_in_flight() {
                     self.note_as(
                         "Wait for the current response to finish before changing workspaces.",
@@ -878,7 +897,6 @@ impl SessionUi {
                     );
                     return Ok(());
                 }
-                let words: Vec<&str> = arg.split_whitespace().collect();
                 match words.as_slice() {
                     ["delete", name] => {
                         match pa_types::workspace::delete_workspace(&agent_dir, name) {
@@ -944,6 +962,49 @@ impl SessionUi {
                     None => self.note("Cleared workspace (using global state).", view),
                 }
                 self.handle_reload_command(view)?;
+            }
+            "agent" => {
+                // `save` and `list` run in the session engine, which knows the session's
+                // model, thinking level and instructions.
+                let words: Vec<&str> = resolved.args.split_whitespace().collect();
+                match words.as_slice() {
+                    ["list"] => self.send_prompt("/agent-list", SubmitBehavior::Steer, view)?,
+                    ["save", rest @ ..] if !rest.is_empty() => self.send_prompt(
+                        &format!("/agent-save {}", rest.join(" ")),
+                        SubmitBehavior::Steer,
+                        view,
+                    )?,
+                    _ => self.error_row("Usage: /agent save <name> [--force] | list", view),
+                }
+            }
+            "retire" => {
+                if self.turn_active || view.working.is_some() || self.work_in_flight() {
+                    self.note_as(
+                        "Wait for the current response to finish before retiring.",
+                        StatusKind::Warning,
+                        view,
+                    );
+                    return Ok(());
+                }
+                let (Some(session_file), Some(agent_dir)) =
+                    (self.session_file.clone(), pa_types::platform::agent_dir())
+                else {
+                    self.error_row("Nothing to retire: this session is not saved.", view);
+                    return Ok(());
+                };
+                self.send_prompt("/refine --global", SubmitBehavior::Steer, view)?;
+                match crate::agents_view::archive_session_file(
+                    agent_dir.join(crate::agents_view::ARCHIVED_FILE),
+                    &session_file,
+                ) {
+                    Ok(()) => self.note(
+                        "Refining harness… this session is archived (ctrl+e in the agents view shows archived sessions).",
+                        view,
+                    ),
+                    Err(err) => {
+                        self.error_row(&format!("Could not archive the session: {err}"), view);
+                    }
+                }
             }
             "heartbeats" => {
                 if !resolved.args.is_empty() {

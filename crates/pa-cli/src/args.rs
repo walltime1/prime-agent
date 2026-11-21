@@ -170,6 +170,8 @@ pub struct Args {
     pub goal: Option<String>,
     pub goal_token_budget: Option<u32>,
     pub workspace: Option<String>,
+    /// The `--agent` blueprint name: fills the launch flags that were not given.
+    pub agent: Option<String>,
     /// The `--list-models` flag's tri-state (None = absent,
     /// Some(None) = the bare flag, Some(Some(x)) = with a value).
     #[allow(clippy::option_option)] // the CLI flag's tri-state is genuinely a double Option
@@ -422,6 +424,7 @@ pub fn parse_args(args: &[String]) -> Args {
                 let value = require_value!(arg);
                 result.goal_token_budget = parse_positive_u32(&value, arg, &mut result.diagnostics);
             }
+            "--agent" => result.agent = Some(require_value!(arg)),
             "--workspace" => {
                 let value = require_value!(arg);
                 if pa_types::workspace::validate_workspace_name(&value).is_err()

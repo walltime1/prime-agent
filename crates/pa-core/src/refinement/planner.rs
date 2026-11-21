@@ -567,7 +567,7 @@ fn action_name(action: RefinementAction) -> &'static str {
     }
 }
 
-fn kind_name(kind: RefinementKind) -> &'static str {
+pub(crate) fn kind_name(kind: RefinementKind) -> &'static str {
     match kind {
         RefinementKind::Prompt => "prompt",
         RefinementKind::Memory => "memory",

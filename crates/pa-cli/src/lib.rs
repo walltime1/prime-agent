@@ -15,6 +15,7 @@
 
 // Internal ported modules are crate-private: the only public API is the
 // runtime boundary below (see crates/pa-cli/README.md).
+pub(crate) mod agent_blueprint;
 pub(crate) mod args;
 pub(crate) mod client_settings;
 pub(crate) mod client_traces;
@@ -121,7 +122,7 @@ fn main_impl(args: &[String], runtime: &dyn mode::Runtime) -> Result<i32, String
         return Ok(crate::config_command::run());
     }
 
-    let parsed = args::parse_args(&args);
+    let mut parsed = args::parse_args(&args);
     if !parsed.diagnostics.is_empty() {
         for diagnostic in &parsed.diagnostics {
             let label = if diagnostic.is_error {
@@ -180,6 +181,9 @@ fn main_impl(args: &[String], runtime: &dyn mode::Runtime) -> Result<i32, String
     }
 
     crate::config::require_agent_dir()?;
+    // After the `--workspace` default-pointer write above: a blueprint's workspace selects this
+    // session's workspace without changing the default for new sessions.
+    agent_blueprint::apply_agent_blueprint(&mut parsed, &crate::config::get_agent_dir())?;
 
     if parsed.export.is_some() {
         // The TS product only reaches the export subsystem through the `session

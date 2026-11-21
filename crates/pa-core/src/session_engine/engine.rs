@@ -173,6 +173,9 @@ pub struct SessionEngine {
     /// The non-local harness store this session's refinements write to: its
     /// pinned workspace's store, else the global store.
     pub harness_write_dir: PathBuf,
+    /// The operating instructions appended to this session's system prompt (an agent blueprint
+    /// body, `APPEND_SYSTEM.md`, or `--append-system-prompt`): `/agent save` writes them back.
+    pub append_system_prompt: String,
 }
 
 /// Skill overrides for built-in integrations the user is not logged into,
@@ -1023,6 +1026,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
         rlm_progress_notes: Arc::clone(&wiring.rlm.notes),
         provisioner,
         harness_write_dir,
+        append_system_prompt: resources.append_system_prompt.join("\n\n"),
     })
 }
 

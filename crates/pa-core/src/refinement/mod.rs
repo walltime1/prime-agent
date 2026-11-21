@@ -647,6 +647,7 @@ fn scope_prefix(scope: HarnessScope, id: &str) -> String {
 
 pub mod executor;
 pub mod planner;
+pub mod promotion;
 pub mod ranking;
 
 // Export the compact-text helper for the digest formatter.
