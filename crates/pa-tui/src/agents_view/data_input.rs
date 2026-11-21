@@ -92,6 +92,9 @@ impl AgentsViewMode {
         if self.starred_only && !scope_active {
             retain_agent_trees(&mut rows, |row| self.is_starred(row));
         }
+        if !self.show_archived && !scope_active {
+            self.drop_archived_trees(&mut rows);
+        }
         // The entry anchor's row may be nested: add its ancestors to the expansion below so this
         // pass reveals it.
         if let (true, Some(anchor)) = (
@@ -585,6 +588,17 @@ impl AgentsViewMode {
         }
         if self.keybindings.matches(key, "app.agents.starred") {
             self.toggle_starred_only();
+            return;
+        }
+        // `app.agents.archive` (default ctrl+a) and `app.agents.archived` (default ctrl+e): the
+        // search editor is append-only, so both Ctrl keys are free and work while a query
+        // narrows the list.
+        if self.keybindings.matches(key, "app.agents.archive") {
+            self.toggle_archive_for_selected();
+            return;
+        }
+        if self.keybindings.matches(key, "app.agents.archived") {
+            self.toggle_show_archived();
             return;
         }
         // `app.agents.rename` (default ctrl+r, empty editor only, before the delete arm):

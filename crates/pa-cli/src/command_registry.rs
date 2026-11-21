@@ -363,6 +363,10 @@ const TOP_LEVEL_OPTION_GROUPS: &[OptionGroup] = &[
                 "--workspace <name>",
                 "Run in a continual-harness workspace (\"global\" for none)",
             ),
+            (
+                "--agent <name>",
+                "Launch from an agent blueprint (agents/<name>.md; save one with /agent save)",
+            ),
             ("--no-session", "Do not save the session"),
             (
                 "--goal <objective>",

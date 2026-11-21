@@ -1,0 +1,1 @@
+- Agent blueprints: save a dialed-in session with `/agent save <name>` (workspace, cwd, model, thinking level, and appended instructions) into `agents/<name>.md`, list them with `/agent list`, and launch one with `prime-agent --agent <name>`; explicit flags override the blueprint.

@@ -63,6 +63,9 @@ impl AgentsViewMode {
         if self.starred_only {
             extra_metadata.push(("filter".to_string(), "starred (ctrl+s: all)".to_string()));
         }
+        if self.show_archived {
+            extra_metadata.push(("archived".to_string(), "shown (ctrl+e: hide)".to_string()));
+        }
         let theme = &self.theme;
         let chrome = crate::chrome::ChromeState {
             version: self.options.version.clone(),
@@ -597,6 +600,7 @@ impl AgentsViewMode {
         let icon = match row.section {
             _ if row.kind == RowKind::PersistentShell => "$",
             Section::Running => ["\u{25c7}", "\u{25c8}", "\u{25c6}", "\u{25c8}"][self.pulse % 4],
+            _ if self.is_archived(row) => "\u{25cb}",
             _ if self.is_starred(row) => "\u{2605}",
             _ => "\u{2022}",
         };

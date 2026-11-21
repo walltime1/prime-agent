@@ -400,6 +400,14 @@ pub const APP_KEYBINDINGS: &[(&str, KeybindingDefinition)] = &[
         def!(&["ctrl+s"], "Show only starred agent sessions"),
     ),
     (
+        "app.agents.archive",
+        def!(&["ctrl+a"], "Archive or unarchive selected agent session"),
+    ),
+    (
+        "app.agents.archived",
+        def!(&["ctrl+e"], "Show or hide archived agent sessions"),
+    ),
+    (
         "app.agents.expand",
         def!(
             &["alt+right"],
