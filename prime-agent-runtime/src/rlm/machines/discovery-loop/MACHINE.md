@@ -29,10 +29,12 @@ never duplicates rows.
 
 ## Prerequisites
 
-1. Pin a workspace first (`/workspace <name>`): the store lives at
-   `<agent_dir>/workspaces/<name>/world_model.db`, shared across sessions.
-   Without a pinned workspace the init state fails fast with the world
-   model's scoping error instead of silently scattering the run.
+1. Pin a workspace first (`/workspace <name>`) if you want cross-session
+   persistence: the store lives at
+   `<agent_dir>/workspaces/<name>/world_model.db`. Without a pinned workspace
+   inside a session kernel, `WorldModel()` falls back to the session-local
+   `<session_artifact_dir>/world_model.db` (`RLM_SESSION_DIR`), which other
+   sessions cannot read.
 2. Record the objective before starting, as an open hypothesis:
 
 ```python
