@@ -56,6 +56,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 import unittest
 from pathlib import Path
@@ -2586,7 +2587,7 @@ class FactoryHelpTest(unittest.TestCase):
             flat,
         )
         self.assertIn(
-            "The bundled seeds are `builder`, `pr-manager`, and `review-sweep`", flat
+            "The bundled seeds are `builder`, `discovery-loop`, `pr-manager`, and `review-sweep`", flat
         )
 
         # The configured inline subagent name contract.
@@ -8813,7 +8814,8 @@ class MachineLibraryResolutionTest(unittest.TestCase):
         self.assertIn("review-sweep", names)
         self.assertIn("builder", names)
         self.assertIn("pr-manager", names)
-        for name in ("review-sweep", "builder", "pr-manager"):
+        self.assertIn("discovery-loop", names)
+        for name in ("review-sweep", "builder", "pr-manager", "discovery-loop"):
             machine, path = resolve_machine(name, repo_dir=repo_dir, user_dir=Path("/nonexistent-user-machines"))
             self.assertEqual(machine.name, name)
             self.assertEqual(validate_factory_spec(machine.spec), [], name)
@@ -9606,3 +9608,173 @@ class InstalledRuntimeLibraryTest(unittest.TestCase):
         # The installed package is the wheel copy, not this checkout's source.
         self.assertNotIn("prime-agent-runtime", str(machine_path), machine_path)
         self.assertEqual(payload["nodes"], ["files", "report", "review"])
+
+
+# ---------------------------------------------------------------------------
+# The bundled discovery-loop machine: a scripted two-cycle run against the
+# real FactoryExecutor, real machine file, and real python-state callables.
+# ---------------------------------------------------------------------------
+
+_PLAN_CYCLE_1 = """```json
+{"plan": {"done": false, "reason": "open hypotheses remain"}, "tasks": [
+  {"role": "codebase-explorer", "prompt": "Trace how the provenance gate binds evidence", "hypothesis": "the gate rejects unsupported claims"},
+  {"role": "reproducer-benchmarker", "prompt": "Run the concurrency suite and record timings", "hypothesis": "workers never hit lock failures"}]}
+```"""
+
+_PLAN_DONE = """```json
+{"plan": {"done": true, "reason": "objective met: hypotheses resolved"}, "tasks": []}
+```"""
+
+_WORKER_FINDINGS = """```json
+{"findings": {"evidence": [
+  {"kind": "code_run", "ref": "python -m unittest discover -s tests", "excerpt": "37 tests OK", "artifact_path": null}],
+  "claims": [{"kind": "finding", "statement": "the provenance gate holds under concurrency", "status": "supported", "confidence": 0.9, "evidence": [0]}]},
+  "dead_ends": []}
+```"""
+
+_SKEPTIC_CANDIDATES = """```json
+{"candidates": {"evidence": [
+  {"kind": "code_run", "ref": "python -m unittest discover -s tests", "excerpt": "37 tests OK"},
+  {"kind": "file_slice", "ref": "skills/world-model/src/world_model/world_model.py", "excerpt": "a claim with status supported requires at least one evidence_id"}],
+  "claims": [
+    {"kind": "finding", "statement": "the provenance gate rejects unsupported claims", "status": "supported", "confidence": 0.9, "evidence": [1]},
+    {"kind": "finding", "statement": "workers never hit lock failures", "status": "supported", "evidence": []}],
+  "refutes": [{"src": 2, "dst": 1, "note": "the seeded counter-claim stands"}]}}
+```"""
+
+_SYNTHESIZED_REPORT = "Final report: the provenance gate holds [e3]; every claim cites stored evidence [e2]."
+
+_DISCOVERY_ANSWERS = {
+    "discovery-worker": _WORKER_FINDINGS,
+    "discovery-skeptic": _SKEPTIC_CANDIDATES,
+    "discovery-synthesizer": _SYNTHESIZED_REPORT,
+}
+
+
+class _CycleScriptedHost(FakeHost):
+    """FakeHost with cycle-aware planner answers: the first planner settle
+    plans a two-task cycle, the second declares the objective met."""
+
+    def __init__(self, clock: FakeClock) -> None:
+        super().__init__(clock)
+        self.planner_admissions = 0
+
+    async def __call__(self, request_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        if request_type == "rlm.run":
+            result = await super().__call__(request_type, payload)
+            node = _node_of_name(payload["kwargs"]["name"])
+            if node == "discovery-planner":
+                self.planner_admissions += 1
+                answer = _PLAN_CYCLE_1 if self.planner_admissions == 1 else _PLAN_DONE
+            else:
+                answer = _DISCOVERY_ANSWERS.get(node)
+            if answer is not None:
+                self.child_outcomes[result["rlm_child_id"]] = {"status": "done", "answer": answer}
+            return result
+        return await super().__call__(request_type, payload)
+
+
+class DiscoveryLoopSeedMachineTest(_ExecutorTestCase):
+    """The shipped discovery-loop seed runs two scripted cycles end to end.
+
+    The machine file resolves from the bundled library, its python states
+    are the real `world_model.factory_states` callables (the working
+    directory points at the skill source so the isolated python-state
+    subprocess imports it), and the scripted host stands in for the four
+    agent states. The verifier is the store: after the run every supported
+    claim carries evidence, the skeptic's leap was downgraded, the refutes
+    edge landed, and the final commit re-bound the same candidates
+    idempotently (no duplicated rows).
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.host = _CycleScriptedHost(self.clock)
+        rlm_module.host_request = self.host  # the patched seam reads this attribute
+        repo_root = Path(__file__).resolve().parents[2]
+        self.skills_src = repo_root / "skills" / "world-model" / "src"
+        if not self.skills_src.is_dir():
+            self.skipTest("the skill source tree is not checked out beside the runtime")
+        previous_cwd = os.getcwd()
+        os.chdir(self.skills_src)
+        self.addCleanup(os.chdir, previous_cwd)
+        sys.path.insert(0, str(self.skills_src))
+        self.addCleanup(sys.path.remove, str(self.skills_src))
+        # The store the init state will resolve: a pinned workspace in the
+        # isolated agent dir, seeded before the run like a real session does.
+        agent_dir = self.settings_path.parent
+        (agent_dir / "active_workspace").write_text("research\n", encoding="utf-8")
+        self.db_path = agent_dir / "workspaces" / "research" / "world_model.db"
+        from world_model import WorldModel
+
+        wm = WorldModel(self.db_path)
+        wm.add_hypothesis("Objective: verify the provenance gate end to end")
+        seed_evidence = wm.add_evidence("code_run", "the seeded run", excerpt="gate held")
+        wm.add_claim("finding", "the gate held in the seeded run", status="supported", evidence_ids=[seed_evidence])
+        wm.add_claim("finding", "the gate never fails anywhere")
+
+    @async_test
+    async def test_two_scripted_cycles_commit_a_provenance_clean_store(self) -> None:
+        result = await self.start("discovery-loop")
+        self.assertEqual(result["machine"], "discovery-loop")
+        run = self.executor._runs[result["run_id"]]
+        await run.task
+        status = await rlm_module.rlm.factory.status(result["run_id"])
+        self.assertEqual(status["state"], "done", status["events"][-6:])
+
+        # One spawn per agent state per cycle: planner twice, two workers
+        # (foreach over two tasks), one skeptic, one synthesizer.
+        self.assertEqual(len(self.host.spawn_calls("discovery-planner")), 2)
+        self.assertEqual(len(self.host.spawn_calls("discovery-worker")), 2)
+        self.assertEqual(len(self.host.spawn_calls("discovery-skeptic")), 1)
+        self.assertEqual(len(self.host.spawn_calls("discovery-synthesizer")), 1)
+
+        # Three commit entries: opening pass, cycle-1 commit, closing pass.
+        commit = run.states["commit"]
+        self.assertEqual([entry.status for entry in commit.entries], ["done", "done", "done"])
+        first_report = commit.entries[0].outputs["report"]
+        self.assertEqual(first_report["done"], False)
+        cycle_report = commit.entries[1].outputs["report"]
+        self.assertEqual(cycle_report["cycle"], 1)
+        self.assertEqual(cycle_report["evidence_added"], 2)
+        self.assertEqual(cycle_report["claims_added"], 2)
+        self.assertEqual(cycle_report["claims_downgraded"], ["workers never hit lock failures"])
+        self.assertEqual(cycle_report["edges_added"], 1)
+        self.assertEqual(cycle_report["done"], False)
+        closing_report = commit.entries[2].outputs["report"]
+        self.assertEqual(closing_report["done"], True)
+        # The closing pass re-binds the cycle-1 candidates: idempotent.
+        self.assertEqual(closing_report["evidence_added"], 0)
+        self.assertEqual(closing_report["claims_added"], 0)
+        self.assertEqual(closing_report["edges_added"], 0)
+
+        # The committed store: every supported claim carries evidence, the
+        # leap stayed open, the refutes edge landed, nothing duplicated.
+        import sqlite3
+
+        from world_model import WorldModel
+
+        wm = WorldModel(self.db_path)
+        self.assertEqual(len(wm.search("37 tests OK")), 1)
+        conn = sqlite3.connect(self.db_path)
+        self.addCleanup(conn.close)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM evidence").fetchone()[0], 3)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM claims").fetchone()[0], 4)
+        unsupported = conn.execute(
+            "SELECT COUNT(*) FROM claims c WHERE c.status = 'supported' AND NOT EXISTS"
+            " (SELECT 1 FROM claim_evidence ce WHERE ce.claim_id = c.id)"
+        ).fetchone()[0]
+        self.assertEqual(unsupported, 0)
+        leap = conn.execute(
+            "SELECT status FROM claims WHERE statement = 'workers never hit lock failures'"
+        ).fetchone()[0]
+        self.assertEqual(leap, "open")
+        refutes = conn.execute(
+            "SELECT src_id, dst_id FROM edges WHERE rel = 'refutes'"
+        ).fetchall()
+        self.assertEqual(refutes, [(2, 1)])
+        linked = conn.execute(
+            "SELECT evidence_id FROM claim_evidence ce JOIN claims c ON c.id = ce.claim_id"
+            " WHERE c.statement = 'the provenance gate rejects unsupported claims'"
+        ).fetchall()
+        self.assertEqual(linked, [(3,)])

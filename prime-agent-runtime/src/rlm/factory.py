@@ -5722,8 +5722,8 @@ watched = await rlm.factory.watch(result["run_id"], 30)
   runs a library machine directly without creating a harness entry; a
   machine that exists but is broken names its errors
   instead of pretending the name is unknown. The bundled seeds are
-  `builder`, `pr-manager`, and `review-sweep`; the worked examples above
-  derive from their shapes.
+  `builder`, `discovery-loop`, `pr-manager`, and `review-sweep`; the worked
+  examples above derive from their shapes.
 - The TUI factory page: the activity dock's `⚙ N factory` group (Enter or
   click) opens one live diagram per run, newest run first. The up/down
   arrows walk the run headers and the states that spawned a child;

@@ -1,0 +1,2 @@
+- New bundled `world-model` skill: a shared SQLite (WAL) store for hypotheses, immutable evidence, provenance-gated claims, claim relations, and tasks with atomic claiming, shared across parallel agent sessions.
+- New bundled `discovery-loop` factory machine: plan, execute, skeptic-audit, and commit cycles over the shared world model, with a guarded back-edge and a final report that cites evidence rows.
