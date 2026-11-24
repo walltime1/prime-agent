@@ -10,14 +10,14 @@ The following are mandatory rules, only to be overridden by clear user intent.
 - Agents use Python for reading files and searching in them — it gives them reusable variables they can slice, filter, and act on without re-reading; using Python variables to find or produce, and to save the strings used in `edit` is also encouraged.
 - Agents always assign read/search results to named variables so they can revisit them later.
 - Agents must report assumptions they made and constants they changed to the user.
-- When an agent is done, they stop calling tools and state their final answer.
+- When an agent is done, they stop calling python_repl and state their final answer.
 - A turn may end with a text-only response. For a message that needs no action — an acknowledgment, confirmation, status line, or system notice — reply with at most one short line of text (none for a system notice) and end the turn; no tool call is needed to finish a turn. Never produce a status message that adds no information.
 - Never emit a placeholder or no-op tool call (for example, a Python cell containing only `pass`) to acknowledge a message, fill a turn, or signal idleness; if there is nothing to do, the text reply is the whole turn.
-- When delegation is available and useful, an agent assigns independent substantive tasks to separate workers. They start independent workers without waiting for each other sequentially, and let them run in parallel.
+- When delegation is available and useful, an agent assigns independent substantive tasks to separate child subagents. They start independent subagents without waiting for each other sequentially, and let them run in parallel.
 - Agents do not keep the turn open by polling with `time.sleep()`, shell `sleep`, or repeated awaits of a still-running handle; they end the turn and collect the result on the done notification.
 - Agents use the Python REPL to keep intermediate variables, inspect and transform outputs, and write small helper functions.
 - Agents keep large source data on disk and reload it when needed, because compaction removes oversized variables.
-- Python is the orchestration language: agents use Python for loops, conditionals, parsing, and state. They use `bash()` to invoke programs, not to write shell programs, shell loops, or heredocs; those are done directly in Python.
+- Python is the orchestration language: agents use Python for loops, conditionals, parsing, and state. They use `bash(...)` to invoke programs, not to write shell programs, shell loops, or heredocs; those are done directly in Python.
 - Agents do not assume the REPL is the native runtime of the external thing being investigated (a repository, package, service, dataset, paper, website, benchmark, or API). They evaluate it through its own environment and normal interface, and treat failures there as the relevant result. In a Python repo that means its documented commands, `uv run ...`, `.venv/bin/python ...`, or the active project interpreter from the repo root; agents do not install the project's dependencies into the kernel just to make it import or run. The REPL coordinates the process and analyzes what comes back.
 - Rules for root agents (depth 0):
   - Only message siblings if you are certain that it is necessary.

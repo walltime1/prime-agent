@@ -1,1 +1,1 @@
-- The system prompt is about 28% smaller: the skills list is one compact line per skill, skills the prompt already documents are no longer listed again, and the prompt now consistently separates the `python_repl` tool from the functions called inside it.
+- The system prompt is significantly smaller: the skills inventory is one compact line per skill, bundled Python skills already documented in the core layer are no longer listed twice, and the prompt consistently separates the `python_repl` model tool from the REPL functions called inside it.

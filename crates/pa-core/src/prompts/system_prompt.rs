@@ -202,7 +202,8 @@ pub fn system_prompt_breakdown(options: &BuildSystemPromptOptions) -> SystemProm
         .iter()
         .filter(|skill| !skill.disable_model_invocation)
         .filter(|skill| {
-            using_custom_prompt || !CORE_DOCUMENTED_SKILLS.contains(&skill.name.as_str())
+            using_custom_prompt
+                || !(skill.is_python() && CORE_DOCUMENTED_SKILLS.contains(&skill.name.as_str()))
         })
         .cloned()
         .collect();
@@ -395,7 +396,7 @@ fn format_generic_mcp_guidance(servers: &[String]) -> String {
     let mut lines = vec![
         "# Generic MCP Connections".to_string(),
         String::new(),
-        "Generic MCP connections are accessed through the pre-imported Python `mcp` object in the Python REPL, not as top-level native tool namespaces or installed Python skills.".to_string(),
+        "Generic MCP servers are called inside `python_repl` through the pre-imported `mcp` module, never as top-level model tools or installed Python skills.".to_string(),
         format!(
             "Enabled generic MCP servers: {}.",
             enabled
@@ -504,11 +505,12 @@ mod tests {
                 .collect()
         };
         let mut options = base_options();
-        assert_eq!(inventory_entries(&options), ["web-search"]);
+        options.skills.push(skill("edit", None));
+        assert_eq!(inventory_entries(&options), ["web-search", "edit"]);
         options.custom_prompt = Some("Be terse.".to_string());
         assert_eq!(
             inventory_entries(&options),
-            ["web-search", "refine", "agent-message"]
+            ["web-search", "refine", "agent-message", "edit"]
         );
     }
 

@@ -235,11 +235,12 @@ pub fn format_skills_for_prompt(skills: &[Skill]) -> String {
             .collect::<Vec<_>>()
             .join(" ");
         let summary = if description.chars().count() > MAX_PROMPT_SKILL_DESCRIPTION_CHARS {
-            let cut: String = description
-                .chars()
-                .take(MAX_PROMPT_SKILL_DESCRIPTION_CHARS)
-                .collect();
-            let head = cut.rsplit_once(' ').map_or(cut.as_str(), |(head, _)| head);
+            let budget = MAX_PROMPT_SKILL_DESCRIPTION_CHARS - 3;
+            let cut: String = description.chars().take(budget + 1).collect();
+            let head = match cut.rsplit_once(' ') {
+                Some((head, _)) if !head.is_empty() => head.to_string(),
+                _ => cut.chars().take(budget).collect(),
+            };
             format!("{head}...")
         } else {
             description
@@ -470,6 +471,7 @@ mod tests {
             .find(|line| line.starts_with("- long "))
             .expect("the skill entry");
         let expected_summary = format!("Line one line two {}...", "word ".repeat(28).trim_end());
+        assert!(expected_summary.chars().count() <= MAX_PROMPT_SKILL_DESCRIPTION_CHARS);
         assert_eq!(
             entry,
             format!("- long [python: long_skill] (/s/SKILL.md): {expected_summary}")
