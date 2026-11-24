@@ -107,15 +107,15 @@ fn package_provided_skill_appears_in_created_session_skill_list() {
     let (stdout, stderr, code) = run(&configured, &script);
     assert_eq!(code, 0, "stderr: {stderr}");
     let text = assistant_text(&stdout);
+    let entry = text
+        .lines()
+        .find(|line| line.starts_with("- e-greeting "))
+        .unwrap_or_else(|| panic!("system prompt lists the package skill:\n{text}"));
     assert!(
-        text.contains("<name>e-greeting</name>"),
-        "system prompt lists the package skill:\n{text}"
+        entry.contains("fixture-pkg/skills/e-greeting/SKILL.md"),
+        "location points into the package: {entry}"
     );
-    assert!(text.contains("<description>Greets from a package</description>"));
-    assert!(
-        text.contains("fixture-pkg/skills/e-greeting/SKILL.md"),
-        "location points into the package"
-    );
+    assert!(entry.ends_with("): Greets from a package"), "{entry}");
 
     // An explicit empty skills filter disables the package's skills.
     let filtered = sandbox(&serde_json::json!({"packages": [{
@@ -128,7 +128,7 @@ fn package_provided_skill_appears_in_created_session_skill_list() {
     assert_eq!(code, 0, "stderr: {stderr}");
     let text = assistant_text(&stdout);
     assert!(
-        !text.contains("<name>e-greeting</name>"),
+        !text.contains("e-greeting"),
         "empty skills filter disables the skill"
     );
 }

@@ -1,0 +1,1 @@
+- The system prompt is about 28% smaller: the skills list is one compact line per skill, skills the prompt already documents are no longer listed again, and the prompt now consistently separates the `python_repl` tool from the functions called inside it.

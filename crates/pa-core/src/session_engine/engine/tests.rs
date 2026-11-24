@@ -611,9 +611,7 @@ async fn engine_over(
 }
 
 fn prompt_lists_skill(engine: &SessionEngine, name: &str) -> bool {
-    engine
-        .system_prompt
-        .contains(&format!("<name>{name}</name>"))
+    engine.system_prompt.contains(&format!("\n- {name} ["))
 }
 
 fn kernel_skill_imports(engine: &SessionEngine) -> Vec<String> {
@@ -626,13 +624,13 @@ fn kernel_skill_imports(engine: &SessionEngine) -> Vec<String> {
 }
 
 /// One model-visible surface per embedding, keyed on the wired host
-/// handlers (#8): the prompt and the kernel pre-import list only the
-/// skills whose host requests registered. Print wires the messaging
+/// handlers (#8): the kernel pre-imports only the skills whose host
+/// requests registered (the core layer documents them statically, so the
+/// prompt inventory omits them). Print wires the messaging
 /// handlers, RPC none, the daemon shape all three (its cron wiring also
 /// serves the heartbeat requests).
 #[tokio::test]
 async fn model_visible_skills_follow_the_embedding_wiring() {
-    let all = ["agent-message", "agent-observe", "rlm-heartbeat"];
     let imports_of = [
         ("agent-message", "agent_message"),
         ("agent-observe", "agent_observe"),
@@ -664,14 +662,7 @@ async fn model_visible_skills_follow_the_embedding_wiring() {
     for (label, wired, cron, daemonless, visible) in cases {
         let (engine, _tmp) = engine_over(Some(handlers(wired)), cron, daemonless).await;
         // The bundled fixtures loaded at all.
-        assert!(prompt_lists_skill(&engine, "compact"), "{label}");
-        for skill in all {
-            assert_eq!(
-                prompt_lists_skill(&engine, skill),
-                visible.contains(&skill),
-                "{label}: {skill}"
-            );
-        }
+        assert!(prompt_lists_skill(&engine, "skill-creator"), "{label}");
         let imports = kernel_skill_imports(&engine);
         for (skill, import) in imports_of {
             assert_eq!(

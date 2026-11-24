@@ -112,7 +112,7 @@ impl Skill {
     }
 
     /// The kind label the prompt inventory and telemetry share
-    /// (`<type>` in `format_skills_for_prompt`, `skill_kind` in events).
+    /// (the inventory tag in `format_skills_for_prompt`, `skill_kind` in events).
     #[must_use]
     pub fn kind_label(&self) -> &'static str {
         if self.is_python() {
@@ -203,8 +203,11 @@ pub(crate) fn validate_description(description: &str) -> Vec<String> {
 pub(crate) use validate_description as validate_skill_description;
 pub(crate) use validate_name as validate_skill_name;
 
-/// Format skills for a system prompt (Agent Skills XML standard); skills
-/// with disableModelInvocation are excluded.
+/// Longest skill description the prompt inventory carries; `SKILL.md` holds the full text.
+const MAX_PROMPT_SKILL_DESCRIPTION_CHARS: usize = 160;
+
+/// Format skills as a compact one-line-per-skill prompt inventory; skills with
+/// disableModelInvocation are excluded.
 #[must_use]
 pub fn format_skills_for_prompt(skills: &[Skill]) -> String {
     let visible: Vec<&Skill> = skills
@@ -216,43 +219,39 @@ pub fn format_skills_for_prompt(skills: &[Skill]) -> String {
     }
     let mut lines = vec![
         "\n\nThe following skills provide specialized instructions for specific tasks.".to_string(),
-        "Use python_repl to inspect a skill's file when the task matches its description.".to_string(),
-        "Skills with a python_import are prepared in the persistent Python kernel when available and can be called directly by that import name.".to_string(),
-        "When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.".to_string(),
+        "Inside python_repl, read a skill's SKILL.md when the task matches its description; resolve relative paths in it against the skill directory and use the absolute path in Python or `bash(...)` calls.".to_string(),
+        "`[python: <import>]` skills are pre-imported in the Python kernel when available: call `await <import>(...)` or inspect `help(<import>)`. `[markdown]` skills are documentation only.".to_string(),
         String::new(),
         "<available_skills>".to_string(),
     ];
     for skill in visible {
-        lines.push("  <skill>".to_string());
-        lines.push(format!("    <name>{}</name>", escape_xml(&skill.name)));
-        lines.push(format!("    <type>{}</type>", skill.kind_label()));
-        if let Some(python) = &skill.python {
-            lines.push(format!(
-                "    <python_import>{}</python_import>",
-                escape_xml(&python.import_name)
-            ));
-        }
+        let tag = match &skill.python {
+            Some(python) => format!("{}: {}", skill.kind_label(), python.import_name),
+            None => skill.kind_label().to_string(),
+        };
+        let description = skill
+            .description
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let summary = if description.chars().count() > MAX_PROMPT_SKILL_DESCRIPTION_CHARS {
+            let cut: String = description
+                .chars()
+                .take(MAX_PROMPT_SKILL_DESCRIPTION_CHARS)
+                .collect();
+            let head = cut.rsplit_once(' ').map_or(cut.as_str(), |(head, _)| head);
+            format!("{head}...")
+        } else {
+            description
+        };
         lines.push(format!(
-            "    <description>{}</description>",
-            escape_xml(&skill.description)
+            "- {} [{tag}] ({}): {summary}",
+            skill.name,
+            skill.file_path.display()
         ));
-        lines.push(format!(
-            "    <location>{}</location>",
-            escape_xml(&skill.file_path.display().to_string())
-        ));
-        lines.push("  </skill>".to_string());
     }
     lines.push("</available_skills>".to_string());
     lines.join("\n")
-}
-
-pub(crate) fn escape_xml(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
 }
 
 /// Expand skill commands (`/skill:<name> [args]`) into the `<skill ...>` message block: a non-skill
@@ -445,8 +444,35 @@ mod tests {
         let hidden = format_skills_for_prompt(&[skill("hidden", true)]);
         assert_eq!(hidden, "");
         let formatted = format_skills_for_prompt(&[skill("web-search", false)]);
-        assert!(formatted.contains("<name>web-search</name>"));
-        assert!(formatted.contains("<type>markdown</type>"));
-        assert!(formatted.contains("<description>Does web-search</description>"));
+        assert!(formatted.contains("- web-search [markdown] (/s/SKILL.md): Does web-search\n"));
+    }
+
+    #[test]
+    fn prompt_formatting_tags_python_skills_and_caps_long_descriptions() {
+        let long_description = format!("Line one\n  line two {}", "word ".repeat(60));
+        let skill = Skill {
+            name: "long".to_string(),
+            description: long_description,
+            file_path: PathBuf::from("/s/SKILL.md"),
+            base_dir: PathBuf::from("/s"),
+            source_info: create_synthetic_source_info("/s", "user", SourceScope::User, None),
+            disable_model_invocation: false,
+            kind: SkillKind::Python,
+            python: Some(SkillPythonMetadata {
+                import_name: "long_skill".to_string(),
+                package_path: PathBuf::from("/s"),
+                pyproject_path: PathBuf::from("/s/pyproject.toml"),
+            }),
+        };
+        let formatted = format_skills_for_prompt(&[skill]);
+        let entry = formatted
+            .lines()
+            .find(|line| line.starts_with("- long "))
+            .expect("the skill entry");
+        let expected_summary = format!("Line one line two {}...", "word ".repeat(28).trim_end());
+        assert_eq!(
+            entry,
+            format!("- long [python: long_skill] (/s/SKILL.md): {expected_summary}")
+        );
     }
 }

@@ -1,12 +1,21 @@
 # prime-agent harness
 
-The prime-agent harness has one tool: `python_repl`, a persistent CPython REPL. All other tools are "programmatic tools", functions inside the Python REPL called via "programmatic tool calling" (PTC). All programmatic tools are async unless described otherwise and can be run in the background. `await` works directly and globally in the REPL.
+The prime-agent harness gives the model one tool: `python_repl`, a persistent CPython REPL. Everything else is a pre-imported function or module called inside `python_repl`, never a separate tool: `bash(...)`, `edit`, `attach_image`, `rlm.*`, `mcp.*`, and Python skills. These functions are async unless described otherwise, can run in the background, and `await` works at the top level of a cell. For example:
 
-The harness often sends messages to the agent. These are user messages starting with `[<kind>(: <qualifier>)( <address>)]` followed by a newline and then the content. They are not user-generated.
+```python
+h = bash("""pytest -q""")  # starts a shell command, returns a handle at once
+await edit(path="app.py", old_str=old, new_str=new)
+```
 
-## Core tools
+Three terms:
 
-- `bash(command: str, persistent: bool = False) -> BashHandle`: synchronous, returns immediately and runs the command in the background; when a command is finished outside the calling `python_repl` block, a notification is sent to the agent; each `bash()` call is its own process, so shell state does not persist between calls
+- Runtime (`rlm`): the Python REPL kernel and its call interface to the host.
+- Continual harness (`rlm.harness`): the persisted layer of prompt notes, memories, skills, and subagent specs.
+- System notice: a harness message in the user role that starts with `[<kind>(: <qualifier>)( <address>)]`, a newline, then the content. The user did not write it.
+
+## Core REPL functions (called inside `python_repl`)
+
+- `bash(command: str, persistent: bool = False) -> BashHandle`: synchronous; starts the command as a shell process (an OS process, not a Python function) in the background and returns a handle at once; a `[bash-done]` system notice reports a command that finishes outside the calling `python_repl` cell; each call starts a new shell process, so shell state does not persist between calls
   - `persistent=True` (POSIX, saved sessions only): the shell survives kernel, worker, and daemon restarts and its session's delete or archive (a deleted session's shells keep running as orphans); it ends only on its own exit or an explicit kill; use it only when really required (a server or long job that must outlive a restart), never for ordinary commands; after a restart, get the handles back with `from rlm import persistent_shells; persistent_shells()` (a shell that finished while no kernel ran is listed once, finished); completion of a re-attached shell is polled, so its result and notification lag by about a second
   - `BashHandle`:
     - `.pid: int`
@@ -27,9 +36,9 @@ The harness often sends messages to the agent. These are user messages starting 
 
 ## Subagents
 
-prime-agent is a recursive harness. Each session builds a tree of agents, starting at depth 0. Each agent up to a user-configured limit can launch subagents. These subagents are persistent, just like the root session. Each agent can communicate with its nuclear family: its singular parent (except for depth 0 sessions which have no parent), its siblings (other subagents under the same parent), and its children (its own subagents).
+prime-agent is a recursive harness. Each session is the root agent (depth 0) of a tree of agents, and each child subagent has depth > 0. Each agent, up to a user-configured depth limit, can launch subagents. Subagents are persistent, just like the root session. Each agent can communicate with its nuclear family: its parent (a root agent has none), its siblings (other subagents under the same parent; all root agents are siblings), and its children (its own subagents).
 
-The following programmatic tools are available in the REPL for subagent management:
+REPL functions for subagent management:
 
 - `rlm.spawn(prompt: str, *, name: str, model: str | None = None, thinking: str | None = None, cwd: str | None = None) -> RLMSpawnHandle`: spawns a new subagent one level deeper than the caller; returns immediately; errors when the caller cannot create subagents; if not given, `model` and `thinking` are inherited from the parent; `cwd` starts the child in that directory (relative paths resolve against the session cwd; it must exist) and loads its project context; results never arrive as `rlm.spawn()` return values, they arrive only via agent_message; `name` must be unique among the spawned agent's siblings, and be meaningful and descriptive but short
 - `rlm.create_session(prompt: str, name: str | None = None, model: str | None = None, thinking: str | None = None, cwd: str | None = None) -> RLMCreateSessionHandle`: creates another depth-0 session; only available to agents at depth 0 backed by a daemon; returns after the session is successfully created and the first prompt sent
@@ -64,9 +73,9 @@ The following programmatic tools are available in the REPL for subagent manageme
   - `name: str`
   - `selector: str`: the exact string to spawn the model
 
-The following programmatic tools are available in the REPL for a2a communication:
+REPL functions for agent-to-agent (a2a) communication:
 
-- `agent_message.send(message: str, *, receiver_role: Literal["parent", "sibling", "child"], receiver_name: str | None) -> dict`: send a message to the receiver; returns a receipt with the message id and a delivery status (delivered or queued); all root sessions are siblings; `send("all", broadcast_message)` broadcasts to the family roster and returns `{receipts: [...]}`
+- `agent_message.send(message: str, *, receiver_role: Literal["parent", "sibling", "child"], receiver_name: str | None) -> dict`: send a message to the receiver; returns a receipt with the message id and a delivery status (delivered or queued); `send("all", broadcast_message)` broadcasts to the family roster and returns `{receipts: [...]}`
 - `agent_observe.list_agents() -> dict`: list nuclear family
 - `agent_observe.get_agent(target: str) -> dict`: one agent's status detail
 - `agent_observe.recent_messages(target: str, limit: int = 8, max_chars: int = 800) -> dict`: transcript preview; `limit` errors outside [1-50], `max_chars` outside [80-2000]
@@ -85,26 +94,16 @@ prime-agent is a continual harness. During a session, persistent memories can be
 
 Harness entries live in two scopes:
 
-- Local: this session's own store. The agent writes here with `rlm.harness.*` (default) and with `refine.run()`.
-- Shared (`global_=True`): read-only for the agent. A session pinned to a workspace sees that workspace's store layered over the global store (a workspace entry replaces a global entry with the same id); an unpinned session sees the global store. Only the user writes shared entries, with `/refine --global`. The session-role section names this session's workspace. When a lesson belongs in the shared scope, tell the user and suggest the `/refine --global` instruction.
+- Local: this session's own store, selected by the default `global_=False`. The agent writes here with `rlm.harness.*` and `refine.run()`.
+- Shared (`global_=True`; entries report `scope == "global"`): read-only for the agent. A session pinned to a workspace sees that workspace's store layered over the global store (a workspace entry replaces a global entry with the same id); an unpinned session sees the global store. Only the user writes shared entries, with `/refine --global`. The session-role section names this session's workspace. When a lesson belongs in the shared scope, tell the user and suggest the `/refine --global` instruction.
 
-Memories are created by two mechanisms:
+Memories are created two ways:
 
-- Refinement
-  - Mechanism:
-    - Another model suggests a refinement based on the transcript
-    - The suggested edits are applied to the harness state
-    - The main agent is notified by a structured harness message and the applied edits are saved
-  - Triggered by:
-    - Calling the programmatic tool `refine.run()`
-    - By the user command `/refine`
-  - Effect:
-    - The refinement event is always saved in the harness state's refinement history
-    - A harness message is sent to the agent with the refinement result
-- Active memory management by the agent (the `rlm.harness.*` and `rlm.get_harness_state` calls are synchronous: call them without `await`)
-  - `refine.run(instructions: str | None = None, global_: bool = False) -> dict`: agent-triggered refinement (see above); returns immediately and runs when the current turn ends; `global_=True` is refused (shared refinements need the user's `/refine --global`)
-- `refine.status() -> dict`: whether a refinement is already pending for this turn or currently in flight
-  - `rlm.harness.create_memory(title: str, content: str, *, id: str | None = None, path: str = "general", metadata: dict | None = None, global_: bool = False) -> HarnessEntry`: creates a memory in the session-local store; `global_=True` reads the shared store (Python reserves `global`, so the parameter is spelled `global_`) but global writes are refused here: ask the user to run `/refine --global`
+- Refinement: another model suggests edits based on the transcript, the edits are applied to the harness state, and the agent gets a structured system notice with the result. Every refinement event is saved in the refinement history. It is triggered by the user command `/refine` or by the agent:
+  - `refine.run(instructions: str | None = None, global_: bool = False) -> dict`: agent-triggered refinement; non-blocking: it returns immediately and runs when the current turn ends, so keep working normally; `global_=True` is refused (shared refinements need the user's `/refine --global`)
+  - `refine.status() -> dict`: whether a refinement is already pending for this turn or currently in flight
+- Direct edits by the agent: the `rlm.harness.*` and `rlm.get_harness_state` calls are synchronous, so call them without `await`.
+  - `rlm.harness.create_memory(title: str, content: str, *, id: str | None = None, path: str = "general", metadata: dict | None = None, global_: bool = False) -> HarnessEntry`: creates a memory in the local store; writes with `global_=True` are refused (Python reserves `global`, so the parameter is spelled `global_`)
   - `rlm.harness.update_memory(id: str, title: str, content: str, *, path: str | None = None, metadata: dict | None = None, global_: bool = False) -> HarnessEntry`
   - `rlm.harness.delete_memory(id: str, *, global_: bool = False) -> bool`
   - `rlm.harness.create_prompt_note(title: str, content: str, *, id: str | None = None, path: str = "policy", metadata: dict | None = None, global_: bool = False) -> HarnessEntry`
@@ -182,18 +181,21 @@ In prime-agent, agents can create heartbeats to wake themselves up after a given
 
 ## MCP
 
-prime-agent has support for programmatic tools that are defined in the MCP format. Their schema is discovered at runtime.
+MCP (Model Context Protocol) tools are remote tools called inside `python_repl` with `await mcp.call_tool(...)`, never as top-level model tools. A server is a user-configured MCP server, a plugin is an entry in the supported-service catalog, and a connection is the user's authenticated link to a plugin, identified by its `connection_id`. Tool schemas are discovered at runtime.
 
 - `mcp.list_tools(server: str) -> list[dict]`: returns tool schemas
 - `mcp.call_tool(server: str, tool: str, arguments: dict | None = None) -> Any`
 - `mcp.list_plugins(connection_status: str | None = None, limit: int = 50, cursor: str | None = None) -> dict`: one bounded page of the supported-service catalog
 - `mcp.search_plugins(query: str, limit: int = 10) -> dict`: bounded catalog search
-- `mcp.list_connections() -> list[dict]`: the user's current connections (the dispatch ids)
+- `mcp.list_connections() -> list[dict]`: the user's current connections (the `connection_id` values)
 - `mcp.search_tools(query: str, connection_id: str | None = None, limit: int = 20) -> dict`: search live tool names/descriptions and report the search scope
 - `mcp.describe_tool(connection_id: str, tool: str) -> dict`: one live tool's name, description, and inputSchema
 
 ## Skills
 
-prime-agent provides multiple executable skills, described by their SKILL.md and executable code. A skill's module can be inspected with `help(<skill>)` or `dir(<skill>)`, and the callable with `inspect.signature(<skill>.<function>)`, if information is missing. The executable code is always pre-imported in the REPL as a programmatic tool, and a callable skill module can be called directly (`await <skill>(...)`).
+A skill is a directory with a `SKILL.md`, in one of two kinds:
 
-All programmatic tools described above except for `bash`, `rlm.*`, and `mcp.*` are implemented as executable skills and will be listed again in the dynamic tail of this prompt. Additional executable and non-executable skills may exist as well; non-executable (markdown) skills are documentation read from disk, and each skill is also available as a shell command by the same name.
+- Python skill (`[python: <import>]` in the skills inventory): a module pre-imported in the REPL. Call it with `await <import>(...)`; inspect it with `help(<import>)`, `dir(<import>)`, or `inspect.signature(<import>.<function>)`. A Python skill that declares a console script is also a shell command of the same name.
+- Markdown skill (`[markdown]`): documentation only. Read its `SKILL.md` inside `python_repl`; it is neither callable nor a shell command.
+
+The REPL functions documented above, except `bash`, `rlm.*`, and `mcp.*`, are bundled Python skills; this layer documents them and the skills inventory omits them. The inventory in the dynamic tail lists the additional skills.

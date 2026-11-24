@@ -373,12 +373,19 @@ fn settings_gated_bundled_skills() -> BTreeSet<String> {
     ["websearch".to_string()].into_iter().collect()
 }
 
+/// Fork-only bundled skills with a class-based API (`WorldModel`), not a callable module: the
+/// prompt documents them only through the dynamic skills inventory, never as core API surface.
+fn inventory_documented_bundled_skills() -> BTreeSet<String> {
+    ["world-model".to_string()].into_iter().collect()
+}
+
 /// (import name, public functions) for every bundled Python skill that is
-/// always available (auth-gated integrations and the conditionally-available
-/// websearch skill excluded).
+/// always available (auth-gated integrations, the conditionally-available
+/// websearch skill, and inventory-documented skills excluded).
 fn bundled_python_skills() -> Vec<(String, Vec<String>)> {
     let gated = auth_gated_bundled_skills();
     let settings_gated = settings_gated_bundled_skills();
+    let inventory_documented = inventory_documented_bundled_skills();
     sorted_bundled_skills()
         .into_iter()
         .filter(|skill| {
@@ -388,6 +395,7 @@ fn bundled_python_skills() -> Vec<(String, Vec<String>)> {
                 .is_none_or(|python| !gated.contains(&python.import_name))
         })
         .filter(|skill| !settings_gated.contains(&skill.name))
+        .filter(|skill| !inventory_documented.contains(&skill.name))
         .filter_map(|skill| {
             let python = skill.python?;
             let mut functions = python_skill_functions(&python.package_path)
@@ -534,13 +542,18 @@ const TS_PACKAGED_SKILL_SET: &[&str] = &[
     "websearch",
 ];
 
-/// The bundled skills directory matches the TS packaged set name-for-name: the generic `mcp` skill
+/// Bundled skills this fork adds on top of the TS packaged set.
+const FORK_ONLY_BUNDLED_SKILLS: &[&str] = &["world-model"];
+
+/// The bundled skills directory matches the TS packaged set plus the fork-only skills
+/// name-for-name: the generic `mcp` skill
 /// is present and markdown-only, and the retired per-service pair (linear/notion) is gone.
 #[test]
 fn bundled_skills_match_the_ts_packaged_set() {
     let skills = sorted_bundled_skills();
     let names: Vec<&str> = skills.iter().map(|skill| skill.name.as_str()).collect();
     let mut expected = TS_PACKAGED_SKILL_SET.to_vec();
+    expected.extend_from_slice(FORK_ONLY_BUNDLED_SKILLS);
     expected.sort_unstable();
     assert_eq!(
         names, expected,
@@ -587,8 +600,8 @@ fn bounded_await_contract_renders_in_daemon_and_daemonless_sessions() {
 }
 
 /// The generic mcp skill loads through the normal markdown discovery and renders in the
-/// `<available_skills>` inventory exactly like any other markdown skill: the `[skill name
-/// location]`-style XML the TS `formatSkillsForPrompt` emits, without a `python_import` line.
+/// `<available_skills>` inventory as a one-line `[markdown]` entry, without a python import tag;
+/// the Python skills the core layer documents stay out of the default inventory.
 #[test]
 fn generic_mcp_skill_renders_in_the_prompt_inventory() {
     let mut options = BuildSystemPromptOptions {
@@ -608,18 +621,17 @@ fn generic_mcp_skill_renders_in_the_prompt_inventory() {
         })
         .map(|segment| segment.text.clone())
         .expect("the skills inventory segment renders");
-    assert!(inventory.contains("<name>mcp</name>"));
-    assert!(inventory.contains("<type>markdown</type>"));
-    let mcp_block_start = inventory
-        .find("<name>mcp</name>")
-        .expect("the mcp skill block");
-    let mcp_block_end = inventory[mcp_block_start..]
-        .find("</skill>")
-        .map_or(inventory.len(), |end| mcp_block_start + end);
-    let mcp_block = &inventory[mcp_block_start..mcp_block_end];
+    let mcp_entry = inventory
+        .lines()
+        .find(|line| line.starts_with("- mcp "))
+        .expect("the mcp skill entry");
     assert!(
-        !mcp_block.contains("python_import"),
-        "a markdown skill never carries a python_import line"
+        mcp_entry.starts_with("- mcp [markdown] ("),
+        "a markdown skill carries the markdown tag and no python import: {mcp_entry}"
+    );
+    assert!(
+        !inventory.contains("- edit [python"),
+        "the core layer documents `edit`, so the default inventory omits it"
     );
     options.generic_mcp_servers = vec!["notion".into()];
     let second = system_prompt_breakdown(&options);

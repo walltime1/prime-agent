@@ -1,25 +1,14 @@
 The following guidelines to agents have been shown to improve results on average. Agents should consider using them where appropriate. Clear user instructions always override these defaults.
 
-- Agents can use the following patterns to make better use of the REPL:
-  - Use f-strings (`f"""..."""` or `f"..."`) in `bash` to programmatically fill in important parameters that are already present in Python code.
+- In `bash(...)` calls inside `python_repl`, use f-strings (`f"""..."""` or `f"..."`) to fill in parameters that already exist in Python code.
 - When writing or explaining something:
   - Agents use simplified technical English by default for user-facing prose: short sentences, common words, and concrete verbs; one main action or fact per sentence when practical; lists for steps or conditions. Necessary technical terms, names, commands, code, paths, and exact quoted text stay unchanged, and uncertainty is stated directly.
-  - Agents use ordinary or established wording. They do not coin a term, label, acronym, mechanism, principle, effect, or named category when the idea can be stated clearly using ordinary language or terminology already established in the context. If a new term is genuinely useful, they explicitly define it and do not imply that it is standard terminology.
-  - Agents keep names and terms consistent. If the prompt or preceding context already uses a name or term for something, the response should use the same wording. Agents do not switch to a synonym, alternative label, or newly invented term unless there is a reason for the change.
-- Agents take care and effort to avoid the following pitfalls while coding:
-  - over-engineered solutions
-  - overly defensive programming
-  - hyper-fixation on rare/fictitious edge cases
-  - overlapping subsystem responsibilities
-  - solving problems at the wrong architectural layer
-  - duplication of sources of truth, then inventing machinery to synchronize them
-  - prematurely generalizing one-off flows
-  - timeouts on everything
-  - production code that exists purely to satisfy tests
-  - patching bad premises additively instead of stepping back and deleting or adjusting them
-  - tests for magic strings
-  - excessive tests
-  - comments that describe anything already described by the code
-  - comments narrating the coding process instead of supporting the written code
-  - fallbacks, legacy support, compatibility shims where not strictly needed; when in doubt, these should be discussed with the user
-  - in UI, descriptions on everything
+  - Agents use ordinary or established wording. They coin a term only when ordinary language cannot state the idea; then they define it and do not imply it is standard terminology.
+  - Agents keep names and terms consistent with the prompt and preceding context, and do not switch to a synonym without a reason.
+- When coding, agents solve each problem at the right architectural layer with the smallest design that works:
+  - Avoid over-engineering, generalizing one-off flows early, overlapping subsystem responsibilities, and duplicate sources of truth (and the machinery to synchronize them).
+  - Avoid defensive code for rare or fictitious edge cases, timeouts on everything, and fallbacks, legacy support, or compatibility shims that are not strictly needed; discuss these with the user when in doubt.
+  - When a premise is bad, delete or adjust it instead of patching around it.
+  - Write tests for behavior that matters: no tests for magic strings, no excessive tests, and no production code that exists only to satisfy tests.
+  - Comment only what the code cannot say; do not narrate the coding process.
+  - In UI, do not put descriptions on everything.

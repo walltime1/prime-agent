@@ -8,6 +8,19 @@ use super::layers;
 /// The bundled skill the refinement trigger guidance keys on.
 pub const REFINE_SKILL_NAME: &str = "refine";
 
+/// Bundled Python skills the core layer documents in full; the default prompt keeps them
+/// out of the skills inventory so each is described once.
+const CORE_DOCUMENTED_SKILLS: &[&str] = &[
+    "agent-message",
+    "agent-observe",
+    "attach-image",
+    "compact",
+    "edit",
+    "goal",
+    REFINE_SKILL_NAME,
+    "rlm-heartbeat",
+];
+
 /// Whether a prompt segment belongs to the cache-stable prefix or the
 /// session-specific tail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +128,10 @@ pub fn system_prompt_breakdown(options: &BuildSystemPromptOptions) -> SystemProm
     let mut segments: Vec<PromptSegment> = Vec::new();
 
     // The static prefix: the user's replacement prompt, or the layered files.
+    let using_custom_prompt = options
+        .custom_prompt
+        .as_deref()
+        .is_some_and(|custom| !custom.is_empty());
     match options.custom_prompt.as_deref() {
         Some(custom) if !custom.is_empty() => {
             segments.push(PromptSegment::static_segment(
@@ -179,13 +196,20 @@ pub fn system_prompt_breakdown(options: &BuildSystemPromptOptions) -> SystemProm
         ));
     }
 
-    let visible_skills: Vec<&Skill> = options
+    // A custom prompt does not document the core API, so it keeps every skill listed.
+    let inventory_skills: Vec<Skill> = options
         .skills
         .iter()
         .filter(|skill| !skill.disable_model_invocation)
+        .filter(|skill| {
+            using_custom_prompt || !CORE_DOCUMENTED_SKILLS.contains(&skill.name.as_str())
+        })
+        .cloned()
         .collect();
-    if has_file_access && !visible_skills.is_empty() {
-        let inventory = format_skills_for_prompt(&options.skills).trim().to_string();
+    if has_file_access && !inventory_skills.is_empty() {
+        let inventory = format_skills_for_prompt(&inventory_skills)
+            .trim()
+            .to_string();
         segments.push(PromptSegment::dynamic_segment(
             "skills-inventory",
             "skill discovery",
@@ -320,7 +344,7 @@ fn session_role_section(options: &BuildSystemPromptOptions, has_ipython: bool) -
         );
     } else {
         lines.push(
-            "This session has no Python REPL (`python_repl` tool): the programmatic tools described above are unavailable here."
+            "This session has no Python REPL (`python_repl` tool): the REPL functions described above are unavailable here."
                 .to_string(),
         );
     }
@@ -344,12 +368,12 @@ fn session_role_section(options: &BuildSystemPromptOptions, has_ipython: bool) -
             );
         } else if has_ipython {
             lines.push(
-                "When a task calls for an answer, reply explicitly with `await agent_message.send(message, receiver_role=\"parent\")`. Not every message or task needs a reply; continue cleanup after sending and go idle normally.".to_string(),
+                "When a task calls for an answer, reply explicitly with `await agent_message.send(message, receiver_role=\"parent\")`. Continue cleanup after sending and go idle normally.".to_string(),
             );
         }
         if has_ipython {
             lines.push(
-                "For long-running work, report brief progress with `await rlm.progress_note('...')` (at most 512 characters, throttled to about one note per 10 seconds); the parent sees notes without needing a reply.".to_string(),
+                "For long-running work, report brief progress with `await rlm.progress_note('...')`.".to_string(),
             );
         }
     }
@@ -461,6 +485,31 @@ mod tests {
         assert!(tail.contains("<available_skills>"));
         assert!(tail.contains("Recursive agent depth: 0 (root)"));
         assert!(tail.contains("Pre-installed Python packages: requests, httpx,"));
+    }
+
+    #[test]
+    fn the_inventory_omits_core_documented_skills_unless_the_prompt_is_custom() {
+        let inventory_entries = |options: &BuildSystemPromptOptions| -> Vec<String> {
+            let breakdown = system_prompt_breakdown(options);
+            let inventory = breakdown
+                .segments
+                .iter()
+                .find(|segment| segment.name == "skills-inventory")
+                .expect("the skills inventory segment renders");
+            inventory
+                .text
+                .lines()
+                .filter(|line| line.starts_with("- "))
+                .map(|line| line.split(' ').nth(1).unwrap_or_default().to_string())
+                .collect()
+        };
+        let mut options = base_options();
+        assert_eq!(inventory_entries(&options), ["web-search"]);
+        options.custom_prompt = Some("Be terse.".to_string());
+        assert_eq!(
+            inventory_entries(&options),
+            ["web-search", "refine", "agent-message"]
+        );
     }
 
     #[test]
