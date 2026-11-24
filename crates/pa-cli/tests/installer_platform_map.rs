@@ -673,7 +673,7 @@ fn install_ps1_installs_uv_like_the_linux_installer() {
         .find("# --- the PATH add")
         .expect("the PATH-add section follows");
     let section = &text[section_start..section_end];
-    let markers: [(&str, &str); 11] = [
+    let markers: [(&str, &str); 12] = [
         (
             "the uv target knob (install-rust.sh's own PRIME_AGENT_UV_BIN_DIR parity: an operator-set dir wins - a packaged install keeps uv inside its own tree, the e2e harnesses point it at their scratch so a run never touches the shared ~/.local/bin; the knob validated early with the other knobs)",
             "if ($env:PRIME_AGENT_UV_BIN_DIR) { $uvInstallDir = $env:PRIME_AGENT_UV_BIN_DIR }",
@@ -691,8 +691,12 @@ fn install_ps1_installs_uv_like_the_linux_installer() {
             "$uvKnown = $uvOnPath -or $uvAtTarget -or $uvAtDefault",
         ),
         (
-            "the astral installer fetch",
-            "Invoke-WebRequest -Uri 'https://astral.sh/uv/install.ps1' -OutFile $uvInstallerPath",
+            "the pinned astral installer fetch",
+            "Invoke-WebRequest -Uri 'https://astral.sh/uv/0.13.5/install.ps1' -OutFile $uvInstallerPath",
+        ),
+        (
+            "the installer checksum gate, before anything runs",
+            "if ($uvInstallerSha256 -ne '84b66aa3018e9d800886543380d967bb3fb9652cfb251cfa5f3c73f4e62f59f2') {",
         ),
         (
             "the fetch checked before the run",

@@ -1306,3 +1306,56 @@ async fn unwritable_stale_venv_names_the_venv_and_both_env_overrides() {
         "no raw lock-candidate path: {message}"
     );
 }
+
+/// A fresh venv takes its preinstalled index packages wheel-only behind the release-age cutoff, and
+/// the local runtime's index dependencies behind the same cutoff.
+#[cfg(unix)]
+#[tokio::test]
+async fn bootstrap_installs_pypi_packages_wheel_only_behind_the_cutoff() {
+    let dir = tempfile::tempdir().unwrap();
+    let uv = fake_uv(
+        dir.path(),
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> {}\nexit 0\n",
+            dir.path().join("uv.log").display()
+        ),
+    );
+    let venv = dir.path().join("venv");
+    // The fake uv creates nothing; the real `uv venv` would.
+    std::fs::create_dir_all(&venv).unwrap();
+    let runtime = dir.path().join("prime-agent-runtime");
+    bootstrap_venv(
+        &venv,
+        &runtime,
+        "sha256:rt",
+        &[],
+        &EnsureKernelPythonOptions::default(),
+        &UvCommand {
+            executable: uv.to_str().unwrap(),
+            project: None,
+        },
+    )
+    .await
+    .unwrap();
+    let python = kernel_venv_python(&venv);
+    assert_eq!(
+        uv_invocations(dir.path()),
+        vec![
+            format!("--no-config python install {PYTHON_VERSION}"),
+            format!(
+                "--no-config venv {} --python {PYTHON_VERSION} --managed-python --seed",
+                venv.display()
+            ),
+            format!(
+                "--no-config pip install --python {} --exclude-newer {PYPI_EXCLUDE_NEWER} --only-binary :all: {STATE_SNAPSHOT_REQUIREMENT} {}",
+                python.display(),
+                default_rlm_extra_uv_args().join(" ")
+            ),
+            format!(
+                "--no-config pip install --python {} --exclude-newer {PYPI_EXCLUDE_NEWER} {}",
+                python.display(),
+                runtime.display()
+            ),
+        ]
+    );
+}

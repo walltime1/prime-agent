@@ -441,13 +441,19 @@ jobs:
         with:
           persist-credentials: false
       - name: Install uv
+        # Pinned and hash-checked, like the uv the installers fetch.
         run: |
-          python3 -m pip install --user uv
+          printf '%s\n' 'uv==0.13.5 --hash=sha256:fa8d26e08e34c29c0c4e820cf3181757086d547240b4f4d31ff1d8bd810ca946' > "$RUNNER_TEMP/uv-requirements.txt"
+          python3 -m pip install --user --require-hashes --only-binary :all: -r "$RUNNER_TEMP/uv-requirements.txt"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Check the runtime lock is current
+        run: |
+          cd prime-agent-runtime
+          uv lock --check
       - name: Run the runtime suite (CPython ${{ matrix.python }})
         run: |
           cd prime-agent-runtime
-          uv run --python ${{ matrix.python }} python -m unittest discover -s test
+          uv run --locked --python ${{ matrix.python }} python -m unittest discover -s test
       - name: Run the bundled skill suites (CPython ${{ matrix.python }})
         run: |
           cd skills/world-model

@@ -63,6 +63,12 @@ const PYTHON_VERSION: &str = "3.14";
 #[cfg(test)]
 const PYTHON_SITE_PACKAGES: &str = concat!("lib/python", "3.14", "/site-packages");
 
+/// Release-age cutoff for every package from the index the kernel venv installs: a
+/// release uploaded after it (a fresh, possibly malicious one) is never
+/// picked. Absolute, so any user uv honors it; bump it deliberately, at least
+/// a few days behind the bump.
+const PYPI_EXCLUDE_NEWER: &str = "2026-11-21T00:00:00Z";
+
 pub(crate) struct UvCommand<'a> {
     pub(super) executable: &'a str,
     pub(super) project: Option<&'a Path>,
@@ -127,29 +133,40 @@ pub(crate) async fn bootstrap_venv(
     runtime_identity: &str,
     python_skills: &[BootstrapPythonSkill],
     options: &EnsureKernelPythonOptions,
-    project: Option<&Path>,
+    uv_command: &UvCommand<'_>,
 ) -> anyhow::Result<()> {
     std::fs::create_dir_all(venv.parent().unwrap_or(Path::new("/")))?;
-    let uv = ensure_uv(project)?;
-    let uv_command = UvCommand {
-        executable: &uv,
-        project,
-    };
     let python = kernel_venv_python(venv);
 
     let venv_str = venv.to_string_lossy().to_string();
     let python_str = python.to_string_lossy().to_string();
-    let mut install_args = vec![
+    // The preinstalled PyPI packages: wheel-only (no index file runs build
+    // code) and behind the release-age cutoff.
+    let mut package_args = vec![
+        "pip".to_string(),
+        "install".to_string(),
+        "--python".to_string(),
+        python_str.clone(),
+        "--exclude-newer".to_string(),
+        PYPI_EXCLUDE_NEWER.to_string(),
+        "--only-binary".to_string(),
+        ":all:".to_string(),
+        STATE_SNAPSHOT_REQUIREMENT.to_string(),
+    ];
+    for uv_arg in default_rlm_extra_uv_args() {
+        package_args.push(uv_arg.to_string());
+    }
+    // The local runtime builds from source; its PyPI dependencies take the
+    // same cutoff.
+    let runtime_args = vec![
         "pip".to_string(),
         "install".to_string(),
         "--python".to_string(),
         python_str,
+        "--exclude-newer".to_string(),
+        PYPI_EXCLUDE_NEWER.to_string(),
         source_dir.to_string_lossy().to_string(),
     ];
-    install_args.push(STATE_SNAPSHOT_REQUIREMENT.to_string());
-    for uv_arg in default_rlm_extra_uv_args() {
-        install_args.push(uv_arg.to_string());
-    }
 
     run_async(
         uv_command.executable,
@@ -176,9 +193,10 @@ pub(crate) async fn bootstrap_venv(
         uv_command.project,
     )
     .await?;
-    run_async(uv_command.executable, &install_args, uv_command.project).await?;
+    run_async(uv_command.executable, &package_args, uv_command.project).await?;
+    run_async(uv_command.executable, &runtime_args, uv_command.project).await?;
     sync_python_skills(
-        &uv_command,
+        uv_command,
         venv,
         &python,
         source_dir,

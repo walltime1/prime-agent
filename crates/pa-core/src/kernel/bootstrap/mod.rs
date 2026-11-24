@@ -289,13 +289,17 @@ async fn ensure_kernel_venv(
             std::fs::remove_dir_all(&venv)
                 .with_context(|| format!("removing {}", venv.display()))?;
         }
+        let uv = ensure_uv(project)?;
         bootstrap_venv(
             &venv,
             &source_dir,
             &runtime_identity,
             python_skills,
             options,
-            project,
+            &UvCommand {
+                executable: &uv,
+                project,
+            },
         )
         .await?;
         Ok(python)

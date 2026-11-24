@@ -1,0 +1,1 @@
+- The kernel venv now installs its preinstalled Python packages wheel-only and skips releases newer than a fixed cutoff, and the installers fetch a pinned, checksum-verified uv installer.

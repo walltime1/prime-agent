@@ -676,8 +676,15 @@ if (-not $uvKnown) {
     $ProgressPreference = 'SilentlyContinue'
     $VerbosePreference = 'SilentlyContinue'
     try {
-        Invoke-WebRequest -Uri 'https://astral.sh/uv/install.ps1' -OutFile $uvInstallerPath -UseBasicParsing -TimeoutSec 60
-        if ((Test-Path $uvInstallerPath -PathType Leaf) -and ((Get-Item -LiteralPath $uvInstallerPath).Length -gt 0)) {
+        # THE PINNED INSTALLER: the versioned astral script, checked against
+        # its SHA-256 before it runs. It carries the per-platform uv archive
+        # digests and verifies the download itself, so the one pin covers
+        # the uv binary.
+        Invoke-WebRequest -Uri 'https://astral.sh/uv/0.13.5/install.ps1' -OutFile $uvInstallerPath -UseBasicParsing -TimeoutSec 60
+        $uvInstallerSha256 = (Get-FileHash -LiteralPath $uvInstallerPath -Algorithm SHA256).Hash.ToLower()
+        if ($uvInstallerSha256 -ne '84b66aa3018e9d800886543380d967bb3fb9652cfb251cfa5f3c73f4e62f59f2') {
+            Step-Fail 'installing uv' "the fetched uv installer failed its checksum ($uvInstallerSha256)"
+        } elseif ((Test-Path $uvInstallerPath -PathType Leaf) -and ((Get-Item -LiteralPath $uvInstallerPath).Length -gt 0)) {
             $callerUvInstallDir = $env:UV_INSTALL_DIR
             $callerUvUnmanaged = $env:UV_UNMANAGED_INSTALL
             $callerUvInstaller = $env:PRIME_AGENT_UV_INSTALLER

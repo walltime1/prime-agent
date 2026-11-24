@@ -6,7 +6,8 @@ use super::{default_rlm_extra_uv_args, BootstrapPythonSkill, BootstrapVersion, P
 // Rebuild existing shared venvs so project Python skills previously installed
 // as editable packages cannot keep executing through site-packages startup.
 // The managed Python moved to 3.14, so existing venvs rebuild cleanly.
-pub(super) const BOOTSTRAP_SCHEMA: u64 = 11;
+// 12: the preinstalled PyPI packages install wheel-only behind a release-age cutoff.
+pub(super) const BOOTSTRAP_SCHEMA: u64 = 12;
 pub(super) const STATE_SNAPSHOT_REQUIREMENT: &str = "dill";
 const BOOTSTRAP_VERSION_FILE: &str = ".bootstrap-version";
 pub(super) fn read_bootstrap_version(venv: &Path) -> Option<BootstrapVersion> {

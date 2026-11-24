@@ -1164,18 +1164,31 @@ else
   # restore its previous generation or install a local archive (the
   # modes are local BY DESIGN; the channel manifest's JSON parsing is
   # Python's one Windows use).
+  # THE PINNED INSTALLER: the versioned astral script, checked against its
+  # SHA-256 before it runs. It carries the per-platform uv archive digests
+  # and verifies the download itself, so the one pin covers the uv binary.
+  # (The fetch drops the script's single trailing newline and printf puts it
+  # back, so the digest is over the served bytes.)
   if [ -n "$uv_bin_dir" ] \
      && { [ "$WINDOWS" != "yes" ] || [ "$MODE" = "channel" ]; }; then
     step_start "Setting up Python (one-time)"
     python_step="yes"
+    uv_installer_sha256="1c6e7f025499664633ac2dce43a210800510e9ef0625c52e034a8afdf8bf177a"
+    if command -v sha256sum >/dev/null 2>&1; then
+      uv_sha256_tool="sha256sum"
+    else
+      uv_sha256_tool="shasum -a 256"
+    fi
     if uv_install_out="$(curl -fsSL --connect-timeout 10 --max-time 60 --retry 2 \
-          https://astral.sh/uv/install.sh)" \
+          https://astral.sh/uv/0.13.5/install.sh)" \
+       && [ "$(printf '%s\n' "$uv_install_out" | $uv_sha256_tool | cut -d' ' -f1)" \
+          = "$uv_installer_sha256" ] \
        && printf '%s\n' "$uv_install_out" \
           | env -u UV_UNMANAGED_INSTALL UV_INSTALL_DIR="$uv_bin_dir" sh >/dev/null 2>&1 \
        && [ -x "${uv_bin_dir}/${uv_name}" ]; then
       uv_bin="${uv_bin_dir}/${uv_name}"
     else
-      say "the uv install failed; falling back to a system python3"
+      say "the uv install failed (download, checksum, or install); falling back to a system python3"
     fi
   fi
 fi

@@ -20,3 +20,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rlm"]
+
+[tool.uv]
+# Cooldown: a release must be three days old before a lock update can pick it.
+exclude-newer = "3d"
