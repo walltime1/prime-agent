@@ -361,6 +361,11 @@ impl SessionCounters {
         );
     }
 
+    /// A skill was used, counted as `skill_use_count`; the skill name never uploads.
+    pub fn note_skill_used(&self) {
+        self.with(|values| values.skill_use_count += 1);
+    }
+
     /// An MCP connector call (the server name never uploads).
     pub fn note_mcp_connector_use(&self) {
         self.with(|values| values.mcp_connector_use_count += 1);
@@ -682,7 +687,7 @@ impl SessionTelemetry {
     /// `skill_use_count` on `agent session ended`; the skill name never
     /// uploads.
     pub fn note_skill_used(&self) {
-        self.counters.with(|values| values.skill_use_count += 1);
+        self.counters.note_skill_used();
     }
 
     /// One turn clock row rode an admitted turn (the `time_context` seam),

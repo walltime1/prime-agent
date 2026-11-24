@@ -1,0 +1,1 @@
+- With more than 15 skills, the system prompt now lists markdown skills as a compact `- <cluster> (<count>): names` index (grouped by frontmatter `category:`/`tags:`, package directory, or name prefix) and resolves them on demand with `rlm.skills.search`, `rlm.skills.list`, and `rlm.skills.read` inside `python_repl`; Python and project skills keep their one-line entries.

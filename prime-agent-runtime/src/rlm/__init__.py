@@ -51,6 +51,36 @@ class RLMModel:
 
 
 @dataclass(frozen=True)
+class RLMSkill:
+    """One skill row from `rlm.skills.search()` / `rlm.skills.list()`.
+
+    `score` is set by `search` only. `python_import` is the pre-imported module of a
+    Python skill (`await <python_import>(...)`).
+    """
+
+    name: str
+    kind: str
+    cluster: str
+    description: str
+    path: Path
+    python_import: str | None = None
+    score: float | None = None
+
+
+@dataclass(frozen=True)
+class RLMSkillDoc:
+    """A skill read by `rlm.skills.read()`: the SKILL.md body without frontmatter.
+
+    Paths inside `body` are relative to `base_dir`.
+    """
+
+    name: str
+    path: Path
+    base_dir: Path
+    body: str
+
+
+@dataclass(frozen=True)
 class RLMSubagentActivity:
     kind: str
     tool_name: str | None = None
@@ -777,9 +807,69 @@ async def _read_transcript(
     return await host_request("agent_observe.session_messages", {**request, "target": target})
 
 
+def _skill_from_payload(payload: Any, operation: str) -> RLMSkill:
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{operation} returned an invalid skill entry")
+    strings = {field: payload.get(field) for field in ("name", "kind", "cluster", "description", "path")}
+    if not all(isinstance(value, str) and value for value in strings.values()):
+        raise RuntimeError(f"{operation} returned an invalid skill entry")
+    return RLMSkill(
+        name=strings["name"],
+        kind=strings["kind"],
+        cluster=strings["cluster"],
+        description=strings["description"],
+        path=Path(strings["path"]),
+        python_import=_optional_str_field(payload, "python_import", operation),
+        score=payload["score"] if isinstance(payload.get("score"), (int, float)) else None,
+    )
+
+
+def _skills_from_reply(reply: dict[str, Any], operation: str) -> list[RLMSkill]:
+    skills = reply.get("skills")
+    if not isinstance(skills, list):
+        raise RuntimeError(f"{operation} returned an invalid skills list")
+    return [_skill_from_payload(skill, operation) for skill in skills]
+
+
+class _RLMSkillsNamespace:
+    """Local skill registry: find and read skills the prompt inventory only names by cluster."""
+
+    async def search(self, query: str, limit: int = 10) -> list[RLMSkill]:
+        """Rank skills by BM25 over name, cluster/tags, and description (no model call)."""
+        if not isinstance(query, str):
+            raise TypeError(f"query must be str, got {type(query).__name__}")
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise TypeError(f"limit must be int, got {type(limit).__name__}")
+        reply = await host_request("rlm.skills.search", {"query": query, "limit": limit})
+        return _skills_from_reply(reply, "rlm.skills.search")
+
+    async def list(self, cluster: str | None = None) -> list[RLMSkill]:
+        """List every skill, or one cluster's, with one-line summaries and paths."""
+        if cluster is not None and not isinstance(cluster, str):
+            raise TypeError(f"cluster must be str or None, got {type(cluster).__name__}")
+        reply = await host_request("rlm.skills.list", {"cluster": cluster})
+        return _skills_from_reply(reply, "rlm.skills.list")
+
+    async def read(self, name: str) -> RLMSkillDoc:
+        """Read a skill's SKILL.md body and its directory (what `/skill:<name>` expands)."""
+        if not isinstance(name, str):
+            raise TypeError(f"name must be str, got {type(name).__name__}")
+        reply = await host_request("rlm.skills.read", {"name": name})
+        fields = {field: reply.get(field) for field in ("name", "path", "base_dir", "body")}
+        if not all(isinstance(value, str) for value in fields.values()) or not fields["name"]:
+            raise RuntimeError("rlm.skills.read returned an invalid skill")
+        return RLMSkillDoc(
+            name=fields["name"],
+            path=Path(fields["path"]),
+            base_dir=Path(fields["base_dir"]),
+            body=fields["body"],
+        )
+
+
 class _RLMNamespace:
     harness = _harness_state
     session = _RLMSessionNamespace()
+    skills = _RLMSkillsNamespace()
     get_harness_state = staticmethod(get_harness_state)
 
     async def spawn(
@@ -866,6 +956,8 @@ __all__ = [
     "RLMMessage",
     "RLMModel",
     "RLMProgressNoteResult",
+    "RLMSkill",
+    "RLMSkillDoc",
     "RLMSpawnHandle",
     "RLMSubagent",
     "RLMSubagentActivity",

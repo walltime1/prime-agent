@@ -196,6 +196,23 @@ MCP (Model Context Protocol) tools are remote tools called inside `python_repl` 
 A skill is a directory with a `SKILL.md`, in one of two kinds:
 
 - Python skill (`[python: <import>]` in the skills inventory): a module pre-imported in the REPL. Call it with `await <import>(...)`; inspect it with `help(<import>)`, `dir(<import>)`, or `inspect.signature(<import>.<function>)`. A Python skill that declares a console script is also a shell command of the same name.
-- Markdown skill (`[markdown]`): documentation only. Read its `SKILL.md` inside `python_repl`; it is neither callable nor a shell command.
+- Markdown skill (`[markdown]`): documentation only. Read its `SKILL.md` inside `python_repl`, or with `rlm.skills.read`; it is neither callable nor a shell command.
 
-The REPL functions documented above, except `bash`, `rlm.*`, and `mcp.*`, are bundled Python skills; this layer documents them and the skills inventory omits them. The inventory in the dynamic tail lists the additional skills.
+The REPL functions documented above, except `bash`, `rlm.*`, and `mcp.*`, are bundled Python skills; this layer documents them and the skills inventory omits them. The inventory in the dynamic tail lists the additional skills: with many skills, Python and project skills keep one line each and the other markdown skills appear as `- <cluster> (<count>): name, name, ...` lines. Resolve those names with the local skill registry, REPL functions called inside `python_repl` (async, no model call):
+
+- `rlm.skills.search(query: str, limit: int = 10) -> list[RLMSkill]`: ranked lexical (BM25) search over skill names, descriptions, clusters, and tags
+- `rlm.skills.list(cluster: str | None = None) -> list[RLMSkill]`: every skill, or one cluster's, with one-line summaries and paths
+- `rlm.skills.read(name: str) -> RLMSkillDoc`: the skill's `SKILL.md` body without frontmatter, plus the `base_dir` its relative paths resolve against (what `/skill:<name>` expands)
+- `RLMSkill`
+  - `name: str`
+  - `kind: Literal["markdown", "python"]`
+  - `cluster: str`
+  - `description: str`: one-line summary
+  - `path: Path`: the `SKILL.md` path
+  - `python_import: str | None`: the pre-imported module of a Python skill
+  - `score: float | None`: set by `search` only
+- `RLMSkillDoc`
+  - `name: str`
+  - `path: Path`
+  - `base_dir: Path`
+  - `body: str`

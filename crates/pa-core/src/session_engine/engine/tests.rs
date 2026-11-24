@@ -610,8 +610,16 @@ async fn engine_over(
     (engine, tmp)
 }
 
+/// Whether the inventory names the skill: as a one-line entry, or inside a cluster index line
+/// (the inventory clusters markdown skills once more than 15 are visible, which user skills
+/// from the machine's home directory can cause).
 fn prompt_lists_skill(engine: &SessionEngine, name: &str) -> bool {
-    engine.system_prompt.contains(&format!("\n- {name} ["))
+    engine.system_prompt.lines().any(|line| {
+        line.starts_with(&format!("- {name} ["))
+            || line.split_once("): ").is_some_and(|(head, names)| {
+                head.starts_with("- ") && names.split(", ").any(|listed| listed == name)
+            })
+    })
 }
 
 fn kernel_skill_imports(engine: &SessionEngine) -> Vec<String> {

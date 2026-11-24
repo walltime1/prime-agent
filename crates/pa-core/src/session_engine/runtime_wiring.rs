@@ -547,6 +547,8 @@ mod tests {
             disable_model_invocation: false,
             kind: SkillKind::Markdown,
             python: None,
+            category: None,
+            tags: Vec::new(),
         }
     }
 

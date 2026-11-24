@@ -438,6 +438,8 @@ mod tests {
                 package_path: PathBuf::from("/skills"),
                 pyproject_path: PathBuf::from("/skills/pyproject.toml"),
             }),
+            category: None,
+            tags: Vec::new(),
         }
     }
 

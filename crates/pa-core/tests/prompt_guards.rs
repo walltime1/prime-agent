@@ -640,6 +640,82 @@ fn generic_mcp_skill_renders_in_the_prompt_inventory() {
         .contains("await mcp.list_tools(\"notion\")"));
 }
 
+/// Many markdown skills collapse into the cluster-name index, and that index is dynamic-tail
+/// content: the cached prefix stays byte-identical to a session with few skills, the static
+/// layers document `rlm.skills.*` without carrying any cluster line, and the cluster line is
+/// smaller than the one-line-per-skill entries it replaces.
+#[test]
+fn clustered_skill_inventory_stays_in_the_dynamic_tail() {
+    use pa_core::skills::{create_synthetic_source_info, Skill, SkillKind, SourceScope};
+
+    let markdown_skill = |name: String| Skill {
+        description: format!("Does {name} for a specific research task"),
+        file_path: format!("/skills/{name}/SKILL.md").into(),
+        base_dir: format!("/skills/{name}").into(),
+        source_info: create_synthetic_source_info("/skills", "user", SourceScope::User, None),
+        disable_model_invocation: false,
+        kind: SkillKind::Markdown,
+        python: None,
+        category: None,
+        tags: Vec::new(),
+        name,
+    };
+    let many: Vec<Skill> = (0..20)
+        .map(|index| markdown_skill(format!("oleafly-skill-{index:02}")))
+        .collect();
+    let options = |skills: Vec<Skill>| BuildSystemPromptOptions {
+        cwd: "/w".to_string(),
+        messages_path: Some("/log.jsonl".to_string()),
+        skills,
+        selected_tools: Some(vec!["python_repl"]),
+        ..Default::default()
+    };
+    let few = system_prompt_breakdown(&options(sorted_bundled_skills()));
+    let mut with_many = sorted_bundled_skills();
+    with_many.extend(many.clone());
+    let clustered = system_prompt_breakdown(&options(with_many));
+
+    assert_eq!(few.cached_prefix_len, clustered.cached_prefix_len);
+    assert_eq!(
+        &few.assembled[..few.cached_prefix_len],
+        &clustered.assembled[..clustered.cached_prefix_len]
+    );
+    let inventory = clustered
+        .segments
+        .iter()
+        .find(|segment| segment.name == "skills-inventory")
+        .expect("the skills inventory segment renders");
+    assert_eq!(inventory.kind, SegmentKind::Dynamic);
+    let cluster_line = inventory
+        .text
+        .lines()
+        .find(|line| line.starts_with("- oleafly (20): "))
+        .expect("the oleafly cluster line renders");
+    assert!(cluster_line.starts_with("- oleafly (20): oleafly-skill-00, oleafly-skill-01, "));
+    assert!(inventory.text.contains("`await rlm.skills.search(query)`"));
+    let flat_len: usize = many
+        .iter()
+        .map(|skill| skill.name.len() + skill.description.len() + skill.file_path.as_os_str().len())
+        .sum();
+    assert!(
+        cluster_line.len() < flat_len,
+        "the cluster line must be smaller than the one-line entries it replaces"
+    );
+
+    for (name, text) in [("core", CORE_LAYER), ("usage", USAGE_LAYER)] {
+        assert!(
+            !text.contains("- oleafly ("),
+            "static layer {name} carries a per-session cluster line"
+        );
+    }
+    for token in ["rlm.skills.search", "rlm.skills.list", "rlm.skills.read"] {
+        assert!(
+            CORE_LAYER.contains(token),
+            "the core layer documents {token}"
+        );
+    }
+}
+
 // Async turn discipline
 
 /// Since #3580 every session kind wakes on bash completion: daemonless runs

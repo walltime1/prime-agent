@@ -535,6 +535,19 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
     let model_visible_skills =
         super::runtime_wiring::model_visible_skills(resources.skills.clone(), &handlers);
     let python_skills = super::runtime_wiring::kernel_python_skills(&model_visible_skills);
+    // `rlm.skills.*` resolves the passive cluster index in the prompt inventory; a JIT read
+    // counts as a skill use (`skill_use_count`) when the session reports telemetry.
+    let on_skill_read: super::skills_host::SkillReadHook = if config.telemetry.is_some() {
+        let counters = std::sync::Arc::clone(&session_counters);
+        std::sync::Arc::new(move || counters.note_skill_used())
+    } else {
+        std::sync::Arc::new(|| {})
+    };
+    super::skills_host::register_skills_host_handlers(
+        &mut handlers,
+        &model_visible_skills,
+        on_skill_read,
+    );
     // TS resolves the web-search credential on the host: `!command` key refs
     // cannot run in-kernel (the websearch skill's auth.json fallback reads
     // literals and env-var names, not commands). The selected provider's

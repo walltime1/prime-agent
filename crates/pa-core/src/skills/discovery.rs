@@ -123,6 +123,26 @@ pub(crate) fn load_skill_from_file(
     } else {
         None
     };
+    let category = frontmatter
+        .get("category")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|category| !category.is_empty())
+        .map(str::to_string);
+    // `tags:` is a YAML list or a comma-separated string.
+    let tags: Vec<String> = match frontmatter.get("tags") {
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .map(str::to_string)
+            .collect(),
+        Some(serde_json::Value::String(text)) => text.split(',').map(str::to_string).collect(),
+        _ => Vec::new(),
+    }
+    .into_iter()
+    .map(|tag| tag.trim().to_string())
+    .filter(|tag| !tag.is_empty())
+    .collect();
     let skill = Skill {
         name,
         description,
@@ -144,6 +164,8 @@ pub(crate) fn load_skill_from_file(
             SkillKind::Markdown
         },
         python,
+        category,
+        tags,
     };
     (Some(skill), diagnostics)
 }
