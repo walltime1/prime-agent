@@ -16,8 +16,8 @@ Three terms:
 ## Core REPL functions (called inside `python_repl`)
 
 - `bash(command: str, persistent: bool = False) -> BashHandle`: synchronous; starts the command as a shell process (an OS process, not a Python function) in the background and returns a handle at once; a `[bash-done]` system notice reports a command that finishes outside the calling `python_repl` cell; each call starts a new shell process, so shell state does not persist between calls
-  - `persistent=True` (POSIX, saved sessions only): the shell survives kernel, worker, and daemon restarts and its session's delete or archive (a deleted session's shells keep running as orphans); it ends only on its own exit or an explicit kill; use it only when really required (a server or long job that must outlive a restart), never for ordinary commands; after a restart, get the handles back with `from rlm import persistent_shells; persistent_shells()` (a shell that finished while no kernel ran is listed once, finished); completion of a re-attached shell is polled, so its result and notification lag by about a second
-  - `BashHandle`:
+  - `persistent=True` (POSIX, saved sessions only): the shell survives kernel, worker, and daemon restarts and its session's delete or archive (a deleted session's shells keep running as orphans); it ends only on its own exit or an explicit kill; use it only when really required (a server or long job that must outlive a restart), never for ordinary commands; after a restart, get the handles back synchronously with `from rlm import persistent_shells; persistent_shells()` (a shell that finished while no kernel ran is listed once, finished); completion of a re-attached shell is polled, so its result and notification lag by about a second
+  - `BashHandle` (methods below are synchronous; only `await handle` is async):
     - `.pid: int`
     - `.running: bool`
     - `.command: str`
@@ -25,11 +25,18 @@ Three terms:
     - `.output() -> str`
     - `.poll() -> BashResult | None`
     - `.kill(sig: int = SIGTERM, grace: float = 5.0) -> None`: SIGTERM, escalating to SIGKILL; on Windows kill() uses taskkill /T and detached or reparented descendants may survive
-    - `await handle`: waits according to this session's bash completion contract; the handle remains awaitable after command completion
+    - `await handle -> BashResult | BashSnapshot`: waits according to this session's bash completion contract; the handle remains awaitable after command completion
   - `BashResult`
+    - `.running: Literal[False]`
     - `.exit_code: int`
     - `.output: str`
     - `.duration: float`
+  - `BashSnapshot` (returned by `await handle` when the command is still running)
+    - `.running: Literal[True]`
+    - `.exit_code: None`
+    - `.output: str`
+    - `.duration: float`
+    - `.handle: BashHandle`
 - `edit.run(path: str, old_str: str, new_str: str) -> str`: the primary method for editing files. async, exact-unique-match; the `edit` module is callable with the same arguments (`await edit(path=..., old_str=..., new_str=...)`)
 - `attach_image(*paths: str) -> str`: loads images directly into context if the agent's model is vision-capable, errors otherwise
 - `rlm.end_turn()`: async; the sanctioned terminal REPL call — returns the turn to the user; the turn ends when the batch's end-turn call finishes Ok (any other calls in the same message still execute first, one end-turn is enough, no further assistant response follows); background work keeps running after the turn returns, and the remaining jobs' completion notices collect the results; raises where the host does not support it, never a silent no-op
@@ -67,6 +74,18 @@ REPL functions for subagent management:
   - `session_dir: Path`
   - `status: Literal["running", "completed", "error"]`
   - rows also carry live activity detail (current activity, tool use count, duration, answer preview, latest progress note)
+- `RLMChildResult`
+  - `rlm_child_id: str`
+  - `session_name: str | None`
+  - `session_dir: Path | None`
+  - `status: str`
+  - `settled: bool`
+  - `answer_preview: str | None`
+  - `answer_text: str | None`: full final answer
+  - `error: str | None`
+  - `duration_ms: int | None`
+  - `tool_use_count: int | None`
+  - `replied_since_task: bool | None`
 - `RLMModel`
   - `provider: str`
   - `id: str`
@@ -75,7 +94,7 @@ REPL functions for subagent management:
 
 REPL functions for agent-to-agent (a2a) communication:
 
-- `agent_message.send(message: str, *, receiver_role: Literal["parent", "sibling", "child"], receiver_name: str | None) -> dict`: send a message to the receiver; returns a receipt with the message id and a delivery status (delivered or queued); `send("all", broadcast_message)` broadcasts to the family roster and returns `{receipts: [...]}`
+- `agent_message.send(message: str, *, receiver_role: Literal["parent", "sibling", "child"], receiver_name: str | None) -> dict`: send a message to the receiver; returns a receipt with the message id and a delivery status (`delivered` or `queued`); broadcast special form: `agent_message.send("all", broadcast_message)` (positional `"all"` first, message second; cannot be combined with `receiver_role`/`receiver_name`) broadcasts to the family roster and returns `{receipts: [...]}`
 - `agent_observe.list_agents() -> dict`: list nuclear family
 - `agent_observe.get_agent(target: str) -> dict`: one agent's status detail
 - `agent_observe.recent_messages(target: str, limit: int = 8, max_chars: int = 800) -> dict`: transcript preview; `limit` errors outside [1-50], `max_chars` outside [80-2000]
@@ -84,9 +103,9 @@ Teams: when work splits into roles that must coordinate (for example planner, co
 
 Teams are not only for code. Common shapes:
 
-- Breadth fan-out + synthesis: for research, audits, or diligence, give each subagent one independent slice (a source family, a subsystem, a question) and spawn one synthesizer that merges their findings into the deliverable, keeping each claim tied to the worker evidence behind it.
-- Competing hypotheses / red team: when the answer is uncertain, assign rival hypotheses to separate siblings, or pair each worker with a skeptic sibling who challenges its claims against raw data and primary sources before anything is accepted.
-- Disk-artifact fan-in: have workers write raw outputs (logs, datasets, notes, reports) to agreed files and return short summaries with the paths; read or hand off those files instead of passing large results through messages or your own context.
+- Breadth fan-out + synthesis: for research, audits, or diligence, give each subagent one independent slice (a source family, a subsystem, a question) and spawn one synthesizer that merges their findings into the deliverable, keeping each claim tied to the subagent evidence behind it.
+- Competing hypotheses / red team: when the answer is uncertain, assign rival hypotheses to separate siblings, or pair each subagent with a skeptic sibling who challenges its claims against raw data and primary sources before anything is accepted.
+- Disk-artifact fan-in: have subagents write raw outputs (logs, datasets, notes, reports) to agreed files and return short summaries with the paths; read or hand off those files instead of passing large results through messages or your own context.
 
 ## Continual Harness
 
@@ -153,7 +172,8 @@ prime-agent compacts automatically when there is only a given number of tokens l
 
 - `compact.run(instructions: str | None = None) -> dict`: schedule a compaction at the next assistant turn boundary
 - `compact.status() -> dict`: context usage & threshold before auto-compaction
-- `rlm.session.messages(start: int = -10, limit: int = 10, *, role: str | tuple[str, ...] = "*", agent=None) -> list[RLMMessage]` / `rlm.session.count(role="*", *, agent=None) -> int`: this session's own transcript on the active branch, or with `agent` a nuclear-family member's (parent, sibling, or child: a name, child id, session id, spawn handle, or `list_subagents()` row), oldest first, including the messages compaction summarized away (each compaction in place as a `compactionSummary` message); `messages` returns `rows[start:][:limit]` (Python slice semantics) of the rows whose role matches `role`, fnmatch globs over `user`, `assistant`, `toolResult`, `custom`, `compactionSummary`, `branchSummary`, `bashExecution`; `count` returns `len(rows)`
+- `rlm.session.messages(start: int = -10, limit: int = 10, *, role: str | tuple[str, ...] = "*", agent=None) -> list[RLMMessage]`: this session's own transcript on the active branch, or with `agent` a nuclear-family member's (parent, sibling, or child: a name, child id, session id, spawn handle, or `list_subagents()` row), oldest first, including messages compaction summarized away (each compaction in place as a `compactionSummary` message); returns `rows[start:][:limit]` (Python slice semantics) of rows whose role matches `role` (fnmatch globs over `user`, `assistant`, `toolResult`, `custom`, `compactionSummary`, `branchSummary`, `bashExecution`)
+- `rlm.session.count(role="*", *, agent=None) -> int`: total matching rows in the same transcript scope
 - `RLMMessage`
   - `index: int`: the position in `rows` for the same `role`; the page before `msgs` is `messages(max(0, i - k), min(k, i), role=role)` with `i = msgs[0].index`
   - `id: str`: the entry id
