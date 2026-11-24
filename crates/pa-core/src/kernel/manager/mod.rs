@@ -478,6 +478,16 @@ impl ReplKernelManager {
         lock(&self.inner.guarded).background_bash_handles.len()
     }
 
+    /// Whether a cell is executing or a host request the kernel sent is
+    /// still being served: idle hibernation must not tear the kernel down
+    /// in either state.
+    #[must_use]
+    pub(crate) fn has_pending_host_requests(&self) -> bool {
+        let mut g = lock(&self.inner.guarded);
+        g.host_inflight.retain(|handle| !handle.is_finished());
+        !g.host_inflight.is_empty() || g.active_execution.is_some()
+    }
+
     /// Process id of the spawned kernel child, when present. Used by tests and
     /// orphan bookkeeping.
     #[must_use]

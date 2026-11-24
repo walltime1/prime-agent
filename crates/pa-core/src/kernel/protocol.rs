@@ -32,6 +32,9 @@ pub enum Request {
     },
     Restore {
         path: String,
+        /// The snapshot's manifest: its recorded Python version tells the
+        /// runtime which records carry bytecode this interpreter cannot run.
+        manifest_path: String,
         /// The snapshot's own byte caps bound the restore's record reads: a corrupt or sparse
         /// snapshot file cannot force a huge allocation.
         max_bytes: u64,
@@ -82,11 +85,13 @@ impl Request {
             }),
             Request::Restore {
                 path,
+                manifest_path,
                 max_bytes,
                 max_variable_bytes,
             } => json!({
                 "type": "restore",
                 "path": path,
+                "manifest_path": manifest_path,
                 "max_bytes": max_bytes,
                 "max_variable_bytes": max_variable_bytes,
             }),

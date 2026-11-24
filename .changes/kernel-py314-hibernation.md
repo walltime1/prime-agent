@@ -1,0 +1,1 @@
+- The Python REPL kernel now runs on Python 3.14 (the shared kernel venv rebuilds once), imports Python skills on first use, and hibernates after 30 idle minutes, restoring its saved namespace on next use (`PRIME_AGENT_KERNEL_IDLE_TTL_SECS=0` disables); functions saved by an older Python are reported instead of revived.

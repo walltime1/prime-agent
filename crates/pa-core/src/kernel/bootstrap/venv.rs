@@ -57,7 +57,12 @@ use version::{
 #[cfg(test)]
 use version::{recorded_skills_cover, BOOTSTRAP_SCHEMA};
 
-const PYTHON_VERSION: &str = "3.11";
+const PYTHON_VERSION: &str = "3.14";
+/// The Unix venv layout path under the managed interpreter. `concat!` keeps the Python
+/// version literal visible beside [`PYTHON_VERSION`]; update both together.
+#[cfg(test)]
+const PYTHON_SITE_PACKAGES: &str = concat!("lib/python", "3.14", "/site-packages");
+
 pub(crate) struct UvCommand<'a> {
     pub(super) executable: &'a str,
     pub(super) project: Option<&'a Path>,

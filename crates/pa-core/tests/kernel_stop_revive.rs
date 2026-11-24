@@ -85,6 +85,7 @@ async fn stop_kernel_flushes_the_snapshot_and_the_next_ensure_revives_it() {
         .stop_kernel(Some(KernelShutdownOptions {
             snapshot: true,
             drain_host_requests: true,
+            only_when_idle: false,
         }))
         .await;
     assert!(
@@ -126,6 +127,7 @@ async fn stop_kernel_without_a_kernel_is_a_no_op_and_stays_revivable() {
         .stop_kernel(Some(KernelShutdownOptions {
             snapshot: true,
             drain_host_requests: true,
+            only_when_idle: false,
         }))
         .await;
     assert!(provisioner.manager().is_none());

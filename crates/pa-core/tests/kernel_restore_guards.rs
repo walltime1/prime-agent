@@ -178,6 +178,7 @@ async fn post_restore_auto_snapshot_skips_until_a_real_cell_changes_the_namespac
         .shutdown(KernelShutdownOptions {
             snapshot: true,
             drain_host_requests: true,
+            only_when_idle: false,
         })
         .await;
     assert!(
@@ -290,6 +291,7 @@ async fn failed_restore_keeps_the_on_disk_payload_through_the_debounced_snapshot
         .shutdown(KernelShutdownOptions {
             snapshot: true,
             drain_host_requests: true,
+            only_when_idle: false,
         })
         .await;
     assert_eq!(
@@ -351,6 +353,7 @@ async fn partial_restore_keeps_the_fuller_on_disk_payload_through_the_dispose_fl
         .shutdown(KernelShutdownOptions {
             snapshot: true,
             drain_host_requests: true,
+            only_when_idle: false,
         })
         .await;
     assert_eq!(
@@ -391,6 +394,7 @@ async fn failed_restore_keeps_the_on_disk_payload_through_the_dispose_flush() {
         .shutdown(KernelShutdownOptions {
             snapshot: true,
             drain_host_requests: true,
+            only_when_idle: false,
         })
         .await;
     assert_eq!(

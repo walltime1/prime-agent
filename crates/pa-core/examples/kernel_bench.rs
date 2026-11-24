@@ -169,6 +169,7 @@ async fn main() {
                 .shutdown(KernelShutdownOptions {
                     snapshot: false,
                     drain_host_requests: false,
+                    only_when_idle: false,
                 })
                 .await;
         }
@@ -201,6 +202,7 @@ async fn main() {
                 .shutdown(KernelShutdownOptions {
                     snapshot: false,
                     drain_host_requests: false,
+                    only_when_idle: false,
                 })
                 .await;
 
@@ -231,6 +233,7 @@ async fn main() {
                 .shutdown(KernelShutdownOptions {
                     snapshot: false,
                     drain_host_requests: false,
+                    only_when_idle: false,
                 })
                 .await;
         }

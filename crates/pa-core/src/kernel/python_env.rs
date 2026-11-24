@@ -224,7 +224,7 @@ mod tests {
     fn python_for_test() -> Option<std::path::PathBuf> {
         let path = std::env::var_os("PATH")?;
         for dir in std::env::split_paths(&path) {
-            for name in ["python3.11", "python3"] {
+            for name in ["python3.14", "python3.11", "python3"] {
                 let Ok(python) = dir.join(name).canonicalize() else {
                     continue;
                 };

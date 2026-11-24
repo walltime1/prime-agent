@@ -39,12 +39,15 @@ mod safe_path_tests {
 
     #[test]
     fn readiness_probe_does_not_import_a_module_from_the_project_cwd() {
-        let Some(python) = ["python3.11", "python3"].into_iter().find(|python| {
-            std::process::Command::new(python)
-                .args(["-P", "-c", "pass"])
-                .status()
-                .is_ok_and(|status| status.success())
-        }) else {
+        let Some(python) = ["python3.14", "python3.11", "python3"]
+            .into_iter()
+            .find(|python| {
+                std::process::Command::new(python)
+                    .args(["-P", "-c", "pass"])
+                    .status()
+                    .is_ok_and(|status| status.success())
+            })
+        else {
             return;
         };
         let dir = tempfile::tempdir().unwrap();

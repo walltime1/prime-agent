@@ -2753,6 +2753,70 @@ class SnapshotTempCleanupTest(unittest.TestCase):
         self.assertEqual(result["skipped"], [{"name": "gone", "reason": "deleted during snapshot"}])
 
 
+class SnapshotPortabilityTest(unittest.TestCase):
+    """A snapshot revives only what this kernel can run: bytecode pickled under
+    another Python minor is reported instead of restored (it would crash the
+    interpreter when called), and lazy skill bindings never enter a snapshot."""
+
+    def setUp(self):
+        sys.path.insert(0, SRC)
+        self.addCleanup(sys.path.remove, SRC)
+        from rlm import repl as repl_module
+
+        self.repl = repl_module
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = tmp.name
+        self.path = os.path.join(self.dir, "kernel-state.dill")
+        self.manifest_path = os.path.join(self.dir, "kernel-state.json")
+
+    def _snap(self, ns):
+        result = self.repl._snapshot_state(ns, self.path, self.manifest_path, 1 << 20, 1 << 20, False)
+        self.assertNotIn("error", result)
+        return result
+
+    def test_code_from_another_python_minor_is_reported_not_restored(self):
+        ns = {"__name__": "__main__"}
+        exec("def bump(n):\n    return n + 1\n", ns)
+        ns["data"] = [1, 2]
+        self._snap(ns)
+        with open(self.manifest_path, encoding="utf-8") as fh:
+            manifest = json.load(fh)
+        manifest["pythonVersion"] = "2.7.18"
+        with open(self.manifest_path, "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh)
+        restored = {}
+        result = self.repl._restore_state(restored, self.path, manifest_path=self.manifest_path)
+        running = f"{sys.version_info[0]}.{sys.version_info[1]}"
+        self.assertEqual(
+            result,
+            {
+                "restored": ["data"],
+                "failed": [{"name": "bump", "reason": f"saved by Python 2.7; its code cannot run on Python {running}"}],
+            },
+        )
+        self.assertEqual(restored, {"data": [1, 2]})
+
+    def test_lazy_skill_bindings_stay_out_of_the_snapshot_without_importing(self):
+        package = os.path.join(self.dir, "snapshot_probe_skill")
+        os.mkdir(package)
+        with open(os.path.join(package, "__init__.py"), "w", encoding="utf-8") as fh:
+            fh.write("VALUE = 1\n")
+        sys.path.insert(0, self.dir)
+        self.addCleanup(sys.path.remove, self.dir)
+        self.addCleanup(sys.modules.pop, "snapshot_probe_skill", None)
+
+        class LazySkill:
+            _prime_agent_snapshot_skip = True
+
+            def __init__(self):
+                # The bootstrap proxy's shape: dill reads an instance dict holding __name__ as a module's.
+                self.__name__ = "snapshot_probe_skill"
+
+        result = self._snap({"snapshot_probe_skill": LazySkill(), "data": [1]})
+        self.assertEqual((result["saved"], result["skipped"]), (["data"], []))
+        self.assertNotIn("snapshot_probe_skill", sys.modules)
+
 
 class SnapshotRestoreBoundsTest(unittest.TestCase):
     """The restore's record reader enforces the writer's own byte caps: a

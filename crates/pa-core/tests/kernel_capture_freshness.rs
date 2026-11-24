@@ -258,6 +258,7 @@ async fn dispose_flush_skips_when_fresh_and_still_restores() {
         .shutdown(KernelShutdownOptions {
             snapshot: true,
             drain_host_requests: true,
+            only_when_idle: false,
         })
         .await;
     assert!(shutdown.is_ok());
@@ -315,6 +316,7 @@ async fn dispose_flush_dumps_after_a_settled_cell() {
         .shutdown(KernelShutdownOptions {
             snapshot: true,
             drain_host_requests: true,
+            only_when_idle: false,
         })
         .await;
     assert!(shutdown.is_ok());
@@ -613,6 +615,7 @@ async fn concurrent_settles_keep_the_boundary_invariant() {
         .shutdown(KernelShutdownOptions {
             snapshot: true,
             drain_host_requests: true,
+            only_when_idle: false,
         })
         .await;
     assert!(shutdown.is_ok());

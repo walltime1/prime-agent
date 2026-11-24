@@ -377,6 +377,7 @@ async fn kill9_then_restart_revives_snapshot_and_reports_unserializable() {
         .shutdown(KernelShutdownOptions {
             snapshot: true,
             drain_host_requests: true,
+            only_when_idle: false,
         })
         .await
         .expect("shutdown");
@@ -507,6 +508,7 @@ async fn graceful_shutdown_flushes_the_final_snapshot() {
         manager.shutdown(KernelShutdownOptions {
             snapshot: true,
             drain_host_requests: true,
+            only_when_idle: false,
         }),
     )
     .await

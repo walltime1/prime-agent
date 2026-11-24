@@ -313,6 +313,8 @@ pub fn kernel_provisioner(
             on_background_work_settled,
             on_unavailable_skills,
             on_bootstrap_result,
+            // `None`: the default idle TTL (or the environment override).
+            idle_hibernate_secs: None,
         },
     ))
 }

@@ -69,6 +69,7 @@ pub async fn shutdown_all_live_kernels() {
                 .shutdown_for_cleanup(crate::kernel::shared::KernelShutdownOptions {
                     snapshot: true,
                     drain_host_requests: false,
+                    only_when_idle: false,
                 })
                 .await;
         }));

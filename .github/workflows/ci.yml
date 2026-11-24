@@ -424,14 +424,18 @@ jobs:
 
   # The vendored runtime suite (prime-agent-runtime): the kernel-side Python
   # (`bash()`, the repl protocol, the bounded-await contract) has no Rust test,
-  # so this is its only CI gate — CPython 3.11, the minimum the runtime
-  # supports and the version the kernel venv pins.
+  # so this is its only CI gate — matrixed across CPython 3.11 (minimum
+  # supported) and CPython 3.14 (the managed kernel venv default).
   runtime:
-    name: runtime suite (python 3.11)
+    name: runtime suite (python ${{ matrix.python }})
     needs: trust
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     if: needs.trust.result == 'success' && needs.trust.outputs.allowed == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -440,14 +444,14 @@ jobs:
         run: |
           python3 -m pip install --user uv
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Run the runtime suite (CPython 3.11)
+      - name: Run the runtime suite (CPython ${{ matrix.python }})
         run: |
           cd prime-agent-runtime
-          uv run --python 3.11 python -m unittest discover -s test
-      - name: Run the bundled skill suites (CPython 3.11)
+          uv run --python ${{ matrix.python }} python -m unittest discover -s test
+      - name: Run the bundled skill suites (CPython ${{ matrix.python }})
         run: |
           cd skills/world-model
-          uv run --python 3.11 python -m unittest discover -s tests
+          uv run --python ${{ matrix.python }} python -m unittest discover -s tests
 
   # The Windows job set + the supply-chain deny gate:
   #

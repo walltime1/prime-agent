@@ -127,6 +127,46 @@ fn version_file_round_trips() {
     ));
 }
 
+#[test]
+fn previous_schema_is_not_a_current_base_version() {
+    let with_schema = |schema, snapshot: Option<&str>, extra_uv_args| BootstrapVersion {
+        schema,
+        runtime: Some("sha256:runtime".to_string()),
+        snapshot: snapshot.map(String::from),
+        extra_uv_args,
+        python_skills: None,
+    };
+    // Everything but the schema is current, so the schema alone decides.
+    let current_fields = |schema| {
+        with_schema(
+            schema,
+            Some(STATE_SNAPSHOT_REQUIREMENT),
+            Some(
+                default_rlm_extra_uv_args()
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+            ),
+        )
+    };
+    assert!(bootstrap_base_version_current(
+        Some(current_fields(BOOTSTRAP_SCHEMA)),
+        "sha256:runtime"
+    ));
+    assert!(!bootstrap_base_version_current(
+        Some(current_fields(BOOTSTRAP_SCHEMA - 1)),
+        "sha256:runtime"
+    ));
+    assert!(!bootstrap_base_version_current(
+        Some(with_schema(
+            BOOTSTRAP_SCHEMA,
+            Some(STATE_SNAPSHOT_REQUIREMENT),
+            None
+        )),
+        "sha256:runtime"
+    ));
+}
+
 #[cfg(unix)]
 #[test]
 fn previous_schema_is_rejected_before_running_a_persisted_venv() {
@@ -207,7 +247,7 @@ fn probe_memo_misses_on_out_of_band_venv_mutation() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = tempfile::tempdir().unwrap();
     let venv = dir.path().join("venv");
-    let rlm = venv.join("lib/python3.11/site-packages/rlm");
+    let rlm = venv.join(PYTHON_SITE_PACKAGES).join("rlm");
     std::fs::create_dir_all(&rlm).unwrap();
     std::fs::write(rlm.join("__init__.py"), "x = 1\n").unwrap();
 
@@ -314,7 +354,7 @@ fn disk_memo_hits_across_a_fresh_process_with_zero_probes() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = tempfile::tempdir().unwrap();
     let venv = dir.path().join("venv");
-    let rlm = venv.join("lib/python3.11/site-packages/rlm");
+    let rlm = venv.join(PYTHON_SITE_PACKAGES).join("rlm");
     std::fs::create_dir_all(&rlm).unwrap();
     std::fs::write(rlm.join("__init__.py"), "x = 1\n").unwrap();
     let counter = dir.path().join("count");
@@ -373,7 +413,7 @@ fn disk_memo_damage_across_processes_misses_and_reprobes() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = tempfile::tempdir().unwrap();
     let venv = dir.path().join("venv");
-    let rlm = venv.join("lib/python3.11/site-packages/rlm");
+    let rlm = venv.join(PYTHON_SITE_PACKAGES).join("rlm");
     std::fs::create_dir_all(&rlm).unwrap();
     std::fs::write(rlm.join("__init__.py"), "x = 1\n").unwrap();
     let counter = dir.path().join("count");
@@ -461,7 +501,7 @@ fn disk_memo_masked_class_hits_across_processes_until_invalidation() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = tempfile::tempdir().unwrap();
     let venv = dir.path().join("venv");
-    let rlm = venv.join("lib/python3.11/site-packages/rlm");
+    let rlm = venv.join(PYTHON_SITE_PACKAGES).join("rlm");
     std::fs::create_dir_all(&rlm).unwrap();
     std::fs::write(rlm.join("__init__.py"), "x = 1\n").unwrap();
     let control = dir.path().join("verdict");
@@ -533,7 +573,7 @@ fn disk_memo_late_write_after_invalidate_is_benign() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = tempfile::tempdir().unwrap();
     let venv = dir.path().join("venv");
-    let rlm = venv.join("lib/python3.11/site-packages/rlm");
+    let rlm = venv.join(PYTHON_SITE_PACKAGES).join("rlm");
     std::fs::create_dir_all(&rlm).unwrap();
     std::fs::write(rlm.join("__init__.py"), "x = 1\n").unwrap();
     let counter = dir.path().join("count");
@@ -686,7 +726,7 @@ fn live_probe_memo_reprobes_when_installed_rlm_is_removed() {
     };
     let dir = tempfile::tempdir().unwrap();
     let fake = dir.path().join("venv");
-    let site = fake.join("lib/python3.11/site-packages");
+    let site = fake.join(PYTHON_SITE_PACKAGES);
     let rlm = site.join("rlm");
     let dill = site.join("dill");
     let real_dill = installed_package_dir(&real_venv, "dill")
@@ -1151,7 +1191,7 @@ async fn unwritable_venv_disables_uncovered_skills_instead_of_failing() {
     }
     let dir = tempfile::tempdir().unwrap();
     let venv = dir.path().join("kernel-venv");
-    let rlm = venv.join("lib/python3.11/site-packages/rlm");
+    let rlm = venv.join(PYTHON_SITE_PACKAGES).join("rlm");
     std::fs::create_dir_all(&rlm).unwrap();
     std::fs::write(rlm.join("__init__.py"), "x = 1\n").unwrap();
     // The fake interpreter passes the runtime and dill probes; only the skill import fails.

@@ -43,6 +43,8 @@ DEFAULT_SNAPSHOT_MAX_VARIABLE_BYTES = 16 * 1024 * 1024
 # Plain ASCII, never a pickle start: _restore_state sniffs it to tell v2 framed
 # payloads from legacy (single dill-pickled dict) ones.
 _SNAPSHOT_MAGIC = b"PRIME-AGENT-KERNEL-SNAPSHOT-V2\n"
+# The dill reconstructor every pickled code object (function, class, lambda) calls.
+_DILL_CODE_MARKER = b"_create_code"
 
 # Stream writes must fit one protocol frame: the host buffers whole lines
 # before its per-execution truncation, and raw fd writes already arrive as
@@ -838,6 +840,8 @@ def _snapshot_state(
                         # A background thread deleted the name after the key listing.
                         skipped.append({"name": name, "reason": "deleted during snapshot"})
                         continue
+                    if getattr(type(value), "_prime_agent_snapshot_skip", False) is True:
+                        continue  # A runtime binding the bootstrap recreates (a lazy Python skill).
                     try:
                         encoded = name.encode("utf-8")
                     except UnicodeEncodeError as err:
@@ -852,10 +856,10 @@ def _snapshot_state(
                     # pruned-ness, and the write always re-measures — in-place mutation
                     # defeats any name-based size tracking from an earlier dump.
                     limit = max_variable_bytes if prune_oversized else min(max_variable_bytes, budget)
+
                     buffer = io.BytesIO()
                     try:
                         dill.dump(value, _CappedWriter(buffer, limit))
-                        blob = buffer.getvalue()
                     except _SnapshotSizeLimitExceeded:
                         if not prune_oversized and budget < max_variable_bytes:
                             skipped.append({"name": name, "reason": "exceeds aggregate snapshot size cap"})
@@ -866,6 +870,7 @@ def _snapshot_state(
                     except Exception as err:  # noqa: BLE001 - one unpicklable name must not abort the snapshot
                         skipped.append({"name": name, "reason": f"{type(err).__name__}: {_safe_str(err)[:200]}"})
                         continue
+                    blob = buffer.getvalue()
                     if total + 12 + len(encoded) + len(blob) > max_bytes:
                         # Only reachable in prune mode, where the measurement cap ignores the budget.
                         skipped.append({"name": name, "reason": "exceeds aggregate snapshot size cap"})
@@ -1125,6 +1130,7 @@ def _restore_state(
     committed: list[dict[str, Any]] | None = None,
     max_bytes: int | None = None,
     max_variable_bytes: int | None = None,
+    manifest_path: str | None = None,
 ) -> dict[str, Any]:
     if not os.path.exists(path):
         return {"restored": [], "failed": [], "reason": "snapshot not found"}
@@ -1132,6 +1138,20 @@ def _restore_state(
         import dill
     except Exception as err:  # noqa: BLE001
         return {"error": f"dill unavailable: {err}"}
+    # Bytecode is specific to one Python minor version: a function or class
+    # pickled under another one unpickles cleanly, then crashes the interpreter
+    # when called. Such records are reported as failed instead of restored.
+    running_python = f"{sys.version_info[0]}.{sys.version_info[1]}"
+    foreign_python = None
+    if manifest_path:
+        try:
+            with open(manifest_path, encoding="utf-8") as fh:
+                recorded = str(json.load(fh).get("pythonVersion") or "")
+        except (OSError, ValueError, AttributeError):
+            recorded = ""
+        recorded_minor = ".".join(recorded.split(".")[:2])
+        if recorded_minor and recorded_minor != running_python:
+            foreign_python = recorded_minor
     unpickler = _snapshot_unpickler(dill)
     try:
         with open(path, "rb") as fh:
@@ -1158,6 +1178,14 @@ def _restore_state(
     failed: list[dict[str, str]] = []
     for name, blob in payload.items():
         if name in _RESTORE_SKIP:
+            continue
+        if foreign_python is not None and isinstance(blob, (bytes, bytearray)) and _DILL_CODE_MARKER in blob:
+            failed.append(
+                {
+                    "name": name,
+                    "reason": f"saved by Python {foreign_python}; its code cannot run on Python {running_python}",
+                }
+            )
             continue
         try:
             staged[name] = unpickler(io.BytesIO(blob)).load()
@@ -1232,6 +1260,7 @@ async def _handle_state(req: dict[str, Any], ns: dict[str, Any]) -> None:
             committed,
             req.get("max_bytes", DEFAULT_SNAPSHOT_MAX_BYTES),
             req.get("max_variable_bytes", DEFAULT_SNAPSHOT_MAX_VARIABLE_BYTES),
+            req.get("manifest_path"),
         )
 
     assert _loop is not None

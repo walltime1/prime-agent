@@ -36,6 +36,10 @@ impl Inner {
     }
 
     pub(crate) async fn perform_shutdown(self: &Arc<Self>, opts: KernelShutdownOptions) -> bool {
+        if opts.only_when_idle && lock(&self.guarded).active_execution.is_some() {
+            // Idle hibernation: a running cell keeps the kernel as it was.
+            return false;
+        }
         if lock(&self.guarded).lifecycle.is_shut_down() {
             live_kernels::remove(self);
             let graceful_in_flight = lock(&self.guarded).lifecycle.graceful_shutdown_in_flight();
@@ -55,10 +59,18 @@ impl Inner {
         }
         // Protocol shutdown first: the runtime closes MCP servers and kills
         // live bash() process groups a bare hard-kill would leak.
-        let protocol_shutdown_available = lock(&self.guarded).lifecycle.is_running();
-        lock(&self.guarded)
-            .lifecycle
-            .transition(Lifecycle::ShuttingDown { generation });
+        let protocol_shutdown_available = {
+            let mut g = lock(&self.guarded);
+            // Re-checked in the transition's own lock scope: a cell admitted
+            // during the flush above must not be torn down under it.
+            if opts.only_when_idle && g.active_execution.is_some() {
+                return false;
+            }
+            let available = g.lifecycle.is_running();
+            g.lifecycle
+                .transition(Lifecycle::ShuttingDown { generation });
+            available
+        };
         live_kernels::remove(self);
 
         let mut performed_cleanup = false;

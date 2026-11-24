@@ -61,6 +61,7 @@ impl BuiltHandles {
                             .stop_kernel(Some(pa_core::kernel::shared::KernelShutdownOptions {
                                 snapshot: true,
                                 drain_host_requests: true,
+                                only_when_idle: false,
                             }))
                             .await;
                     }

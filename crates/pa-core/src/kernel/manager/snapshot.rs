@@ -215,6 +215,7 @@ impl Inner {
         }
         let request = Request::Restore {
             path: cfg.path.to_string_lossy().to_string(),
+            manifest_path: cfg.manifest_path.to_string_lossy().to_string(),
             max_bytes: cfg.max_bytes.unwrap_or(DEFAULT_SNAPSHOT_MAX_BYTES),
             max_variable_bytes: cfg
                 .max_variable_bytes

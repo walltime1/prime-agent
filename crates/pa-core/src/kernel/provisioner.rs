@@ -23,6 +23,8 @@ use crate::kernel::shared::{
 use crate::kernel::state_snapshot::RestoreResult;
 use crate::kernel::state_snapshot::{manifest_path_in, snapshot_path_in};
 
+mod hibernation;
+
 /// Above core count because boots are IO-bound, capped so a fan-out can't
 /// thrash the FS past the ready-handshake window.
 fn default_kernel_boot_concurrency() -> usize {
@@ -138,6 +140,15 @@ pub struct IpythonKernelProvisionerOptions {
     /// Publishes the per-boot result for the `kernel_bootstrap_*` counters.
     /// Telemetry only; kernel behavior never depends on it.
     pub on_bootstrap_result: Option<KernelBootstrapResultHandler>,
+    /// Idle time before the kernel hibernates, in seconds (`None`: the
+    /// default, 30 minutes; `Some(0)`: disabled). After this long with no
+    /// `ensure()`, no cell execution, no pending host request, and no live
+    /// background `bash()` handle, the kernel flushes its snapshot and exits;
+    /// the next `ensure()` boots a fresh kernel and restores that snapshot.
+    /// Only a session with a `snapshot_dir` hibernates, so an ephemeral
+    /// session never does. `PRIME_AGENT_KERNEL_IDLE_TTL_SECS` overrides it
+    /// (`0` disables).
+    pub idle_hibernate_secs: Option<u64>,
 }
 
 /// Why and how long one startup failed, published through the shared startup
@@ -233,6 +244,14 @@ struct ProvisionerState {
     /// doomed boot entirely and can orphan its kernel at worker exit.
     /// Each parked memo is spent by its own boot's settle.
     doomed_startups: Vec<tokio::sync::watch::Receiver<Option<StartupResult>>>,
+    /// The flush gate of the in-flight hibernation (see the
+    /// `hibernation` module): its kernel already left `manager`, so
+    /// `ensure()` boots a replacement gated on it, and `dispose()` waits it
+    /// so a worker exit never orphans the flushing kernel.
+    hibernating: Option<tokio::sync::watch::Receiver<bool>>,
+    /// The last time a caller used the kernel (`ensure()`, a namespace op):
+    /// the idle TTL counts from here.
+    last_activity: tokio::time::Instant,
 }
 
 /// Owns one kernel for one session: starts it, memoizes the startup so concurrent callers join the
@@ -249,6 +268,37 @@ struct ProvisionerInner {
     options: IpythonKernelProvisionerOptions,
     state: Mutex<ProvisionerState>,
     dispose_signal: AbortSignal,
+    /// Namespace ops in flight through the provisioner: a kernel serving one
+    /// is not idle.
+    in_flight: std::sync::atomic::AtomicUsize,
+}
+
+impl ProvisionerInner {
+    fn lock_state(&self) -> std::sync::MutexGuard<'_, ProvisionerState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Mark one kernel use: restart the idle TTL and keep the kernel
+    /// resident for the duration of the returned guard.
+    fn enter(&self) -> InFlight<'_> {
+        self.in_flight
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.lock_state().last_activity = tokio::time::Instant::now();
+        InFlight(self)
+    }
+}
+
+/// One in-flight kernel use; see [`ProvisionerInner::enter`].
+struct InFlight<'a>(&'a ProvisionerInner);
+
+impl Drop for InFlight<'_> {
+    fn drop(&mut self) {
+        self.0
+            .in_flight
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 impl IpythonKernelProvisioner {
@@ -268,17 +318,17 @@ impl IpythonKernelProvisioner {
                     pending_stop: None,
                     pending_stop_for_startup: None,
                     doomed_startups: Vec::new(),
+                    hibernating: None,
+                    last_activity: tokio::time::Instant::now(),
                 }),
                 dispose_signal: AbortSignal::new(),
+                in_flight: std::sync::atomic::AtomicUsize::new(0),
             }),
         }
     }
 
     fn lock_state(&self) -> std::sync::MutexGuard<'_, ProvisionerState> {
-        self.inner
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.inner.lock_state()
     }
 
     /// The kernel manager, once a startup has completed successfully.
@@ -354,6 +404,9 @@ impl IpythonKernelProvisioner {
             if state.disposed {
                 return Err(anyhow!("Kernel provisioner disposed"));
             }
+            // Stamped under the lock the hibernation claim takes: a caller
+            // handed the live kernel here is never hibernated under it.
+            state.last_activity = tokio::time::Instant::now();
             if let Some(manager) = &state.manager {
                 if manager.is_defunct() {
                     state.manager = None;
@@ -362,6 +415,13 @@ impl IpythonKernelProvisioner {
             }
             if let Some(manager) = state.manager.clone() {
                 return Ok(manager);
+            }
+            // Joining an in-flight hibernation is starting this kernel: its
+            // flush is part of the boot, so a handler sees the restart
+            // stages a plain stop-revive would report instead of landing
+            // silently on a new kernel.
+            if let (Some(progress), Some(_)) = (&on_progress, &state.hibernating) {
+                progress(hibernation::REVIVE_MESSAGE);
             }
             if let Some(progress) = &on_progress {
                 if let Some(message) = state.last_startup_message.as_deref() {
@@ -430,7 +490,10 @@ impl IpythonKernelProvisioner {
                         }
                     };
                     let settled = match settle {
-                        Settle::Published(manager) => Ok(manager),
+                        Settle::Published(manager) => {
+                            hibernation::watch_idle_kernel(&inner, &manager);
+                            Ok(manager)
+                        }
                         Settle::TearDownForDispose {
                             manager,
                             snapshot,
@@ -443,7 +506,7 @@ impl IpythonKernelProvisioner {
                             let _ = manager
                                 .shutdown(KernelShutdownOptions {
                                     snapshot,
-                                    drain_host_requests: true,
+                                    ..KernelShutdownOptions::default()
                                 })
                                 .await;
                             Err(StartupFailure {
@@ -531,6 +594,7 @@ impl IpythonKernelProvisioner {
     /// Remove live variables above the snapshot's per-variable size limit.
     pub async fn prune_oversized_variables(&self) -> Option<Vec<String>> {
         let manager = self.manager()?;
+        let _busy = self.inner.enter();
         manager
             .prune_oversized_variables()
             .await
@@ -541,6 +605,7 @@ impl IpythonKernelProvisioner {
     /// failed or no kernel is running.
     pub async fn list_namespace_names(&self, signal: Option<AbortSignal>) -> Option<Vec<String>> {
         let manager = self.manager()?;
+        let _busy = self.inner.enter();
         manager.list_namespace_names(signal).await
     }
 
@@ -593,6 +658,7 @@ impl IpythonKernelProvisioner {
                             .shutdown(KernelShutdownOptions {
                                 snapshot,
                                 drain_host_requests: true,
+                                only_when_idle: false,
                             })
                             .await;
                     }
@@ -657,6 +723,14 @@ impl IpythonKernelProvisioner {
             (state.startup.clone(), state.doomed_startups.clone())
         };
         self.inner.dispose_signal.abort();
+        // An in-flight hibernation owns its kernel until the flush settles:
+        // dispose() returns only after it (a worker exit must never orphan
+        // the flushing kernel). A watcher that has not claimed yet sees
+        // `disposed` and stands down.
+        let hibernating = self.lock_state().hibernating.clone();
+        if let Some(mut flushed) = hibernating {
+            let _ = flushed.wait_for(|done| *done).await;
+        }
         // A boot `kill()` invalidated settles like an armed one: the
         // dispose must not return while its kernel is still settling, or a
         // worker exit could orphan it.
@@ -672,6 +746,7 @@ impl IpythonKernelProvisioner {
                 .shutdown(KernelShutdownOptions {
                     snapshot,
                     drain_host_requests: true,
+                    only_when_idle: false,
                 })
                 .await;
         }
@@ -750,6 +825,7 @@ fn park_or_tear_down(
             duration_ms,
         },
         SettleDecision::Publish => {
+            state.last_activity = tokio::time::Instant::now();
             state.manager = Some(manager.clone());
             Settle::Published(manager)
         }
@@ -1139,6 +1215,7 @@ async fn start_kernel_impl(
             .shutdown(KernelShutdownOptions {
                 snapshot: snapshot_policy,
                 drain_host_requests: true,
+                only_when_idle: false,
             })
             .await;
         // The drained stderr tail is the only extra evidence a failed boot
@@ -1197,6 +1274,7 @@ async fn start_kernel_impl(
                 .shutdown(KernelShutdownOptions {
                     snapshot: snapshot_policy,
                     drain_host_requests: true,
+                    only_when_idle: false,
                 })
                 .await;
             return Err(anyhow!("Kernel provisioner disposed during startup"));
@@ -1251,6 +1329,7 @@ async fn start_kernel_impl(
                 .shutdown(KernelShutdownOptions {
                     snapshot: snapshot_policy,
                     drain_host_requests: true,
+                    only_when_idle: false,
                 })
                 .await;
             // An aborted bootstrap with a live dispose signal is the bound
@@ -1274,6 +1353,7 @@ async fn start_kernel_impl(
                 .shutdown(KernelShutdownOptions {
                     snapshot: snapshot_policy,
                     drain_host_requests: true,
+                    only_when_idle: false,
                 })
                 .await;
             return Err(error);

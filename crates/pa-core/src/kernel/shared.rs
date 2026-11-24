@@ -371,10 +371,28 @@ pub struct KernelManagerOptions {
 
 /// Shutdown options: whether to flush a final namespace snapshot and drain
 /// in-flight host requests before tearing the kernel down.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct KernelShutdownOptions {
     pub snapshot: bool,
     pub drain_host_requests: bool,
+    /// Whether the teardown must not interrupt a cell that is still running
+    /// (idle hibernation's precondition, with `drain_host_requests`): such a
+    /// teardown hands the kernel back untouched instead of flushing or
+    /// killing, so a cell that raced the shutdown completes instead of
+    /// losing its work.
+    pub only_when_idle: bool,
+}
+
+/// A full teardown: flush the final snapshot, drain host requests, and
+/// interrupt whatever is running (the pre-hibernation behavior).
+impl Default for KernelShutdownOptions {
+    fn default() -> Self {
+        Self {
+            snapshot: true,
+            drain_host_requests: true,
+            only_when_idle: false,
+        }
+    }
 }
 
 /// Parse a [`DIFF_DISPLAY_MIME`] payload, tolerating malformed input.

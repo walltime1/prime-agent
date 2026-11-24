@@ -1159,6 +1159,7 @@ impl SessionEngine {
             .stop_kernel(Some(crate::kernel::shared::KernelShutdownOptions {
                 snapshot: true,
                 drain_host_requests: true,
+                only_when_idle: false,
             }))
             .await;
     }
