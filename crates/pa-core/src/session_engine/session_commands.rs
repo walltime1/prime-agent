@@ -450,14 +450,7 @@ async fn execute_agent_save(
         .as_deref()
         .ok_or("Cannot resolve the agent directory.")?;
     let state = engine.session.agent().state().await;
-    let cwd = engine
-        .session
-        .session_handle()
-        .lock()
-        .await
-        .get_cwd()
-        .display()
-        .to_string();
+    let cwd = engine.session.cwd().await.display().to_string();
     let blueprint = crate::resources::blueprints::Blueprint {
         name: name.to_string(),
         description: None,
@@ -494,13 +487,7 @@ async fn execute_agent_list(
         .agent_dir
         .as_deref()
         .ok_or("Cannot resolve the agent directory.")?;
-    let cwd = engine
-        .session
-        .session_handle()
-        .lock()
-        .await
-        .get_cwd()
-        .to_path_buf();
+    let cwd = engine.session.cwd().await;
     let text = crate::resources::blueprints::format_blueprint_list(&cwd, agent_dir);
     execution.push_message(slash_command_result(
         command, text, true, "info", None, true,

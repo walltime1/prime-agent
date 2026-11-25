@@ -1,0 +1,1 @@
+- Failed tool calls and plain-text pseudo-tool-call responses now emit a concise `Memo:` with registered tool schemas so the model can self-correct via native function calling instead of repeating the failure.

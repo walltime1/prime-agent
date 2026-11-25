@@ -2,11 +2,14 @@
 //! steering/follow-up/continuation message polling, and stop-hook
 //! evaluation.
 
+use std::sync::Arc;
+
 use crate::abort::AbortSignal;
 use crate::stream::StreamFn;
 use crate::types::{
-    AgentContext, AgentEvent, AgentMessage, AssistantContent, Message, ShouldStopAfterTurnContext,
-    StopReason, ToolCall, ToolResultMessage, UserContent, UserMessage,
+    AgentContext, AgentEvent, AgentMessage, AgentTool, AssistantContent, Message,
+    ShouldStopAfterTurnContext, StopReason, ToolCall, ToolResultContent, ToolResultMessage,
+    UserContent, UserMessage,
 };
 
 use super::abort::{
@@ -34,6 +37,8 @@ pub(crate) async fn run_loop(
     let mut first_turn = true;
     let mut last_turn: Option<ShouldStopAfterTurnContext> = None;
     let mut stall_nudged = false;
+    let mut error_memo_nudged = false;
+    let mut pseudo_memo_nudged = false;
     let mut pending_messages =
         poll_messages_unless_aborted(config.get_steering_messages.as_ref(), signal).await?;
 
@@ -204,8 +209,68 @@ pub(crate) async fn run_loop(
                 }
                 PostTurnResult::Completed(messages) => {
                     pending_messages = messages;
-                    if !reasoning_only_stall {
+                    let failed_tool_calls =
+                        tool_results.iter().filter(|result| result.is_error).count();
+                    if failed_tool_calls > 0 {
                         stall_nudged = false;
+                        pseudo_memo_nudged = false;
+                        if pending_messages.is_empty() && !error_memo_nudged {
+                            error_memo_nudged = true;
+                            let total_tool_calls = tool_results.len();
+                            let available_tools = format_available_tools(&current_context.tools);
+                            let mut failures = Vec::new();
+                            for result in tool_results.iter().filter(|result| result.is_error) {
+                                let detail = result
+                                    .content
+                                    .iter()
+                                    .filter_map(|content| match content {
+                                        ToolResultContent::Text(text) => Some(text.text.as_str()),
+                                        ToolResultContent::Image(_) => None,
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                let first_line =
+                                    detail.lines().next().unwrap_or("unknown error").trim();
+                                let first_line: String = first_line.chars().take(300).collect();
+                                failures
+                                    .push(format!("- '{}' failed: {first_line}", result.tool_name));
+                            }
+                            let failures = failures.join("\n");
+                            pending_messages.push(AgentMessage::user(format!(
+                                "Memo: {failed_tool_calls} of {total_tool_calls} tool call(s) failed.\n{failures}\nAvailable tools: {available_tools}. Fix the failing call and retry; do not repeat the identical failing call."
+                            )));
+                        }
+                    } else if tool_calls.is_empty()
+                        && message.content.iter().any(|content| match content {
+                            AssistantContent::Text(text) => {
+                                let lower = text.text.to_ascii_lowercase();
+                                let has_tag = lower.contains("<tool_call")
+                                    || lower.contains("<tool-call")
+                                    || lower.contains("<function_call")
+                                    || lower.contains("<invoke");
+                                let has_call_shape = lower.contains("\"name\"")
+                                    || lower.contains("\"args\"")
+                                    || lower.contains("\"arguments\"")
+                                    || lower.contains("<name>")
+                                    || lower.contains("name=");
+                                has_tag && has_call_shape
+                            }
+                            AssistantContent::Thinking(_) | AssistantContent::ToolCall(_) => false,
+                        })
+                    {
+                        stall_nudged = false;
+                        error_memo_nudged = false;
+                        if pending_messages.is_empty() && !pseudo_memo_nudged {
+                            pseudo_memo_nudged = true;
+                            let available_tools = format_available_tools(&current_context.tools);
+                            pending_messages.push(AgentMessage::user(format!(
+                                "Memo: your previous reply wrote a tool call as plain text instead of invoking a tool, so nothing ran.\nDo not output XML tags or JSON tool calls (or \"args\") in assistant text.\nInvoke a registered tool directly through the native function-calling interface.\nAvailable tools: {available_tools}."
+                            )));
+                        }
+                    } else if !reasoning_only_stall {
+                        stall_nudged = false;
+                        error_memo_nudged = false;
+                        pseudo_memo_nudged = false;
                     } else if pending_messages.is_empty() && !stall_nudged {
                         stall_nudged = true;
                         pending_messages.push(AgentMessage::from(UserMessage {
@@ -292,10 +357,38 @@ pub(crate) async fn run_loop(
     Ok(())
 }
 
-pub(crate) fn clone_context(context: &AgentContext) -> AgentContext {
-    AgentContext {
-        system_prompt: context.system_prompt.clone(),
-        messages: context.messages.clone(),
-        tools: context.tools.clone(),
+use super::clone_context;
+
+fn format_available_tools(tools: &[Arc<dyn AgentTool>]) -> String {
+    if tools.is_empty() {
+        return "none".to_string();
     }
+    tools
+        .iter()
+        .map(|tool| {
+            let schema = tool.parameters();
+            let required_params: Vec<&str> = schema
+                .get("required")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_default();
+            let params = if !required_params.is_empty() {
+                required_params.join(", ")
+            } else if let Some(props) = schema.get("properties").and_then(|v| v.as_object()) {
+                props
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            } else {
+                String::new()
+            };
+            if params.is_empty() {
+                tool.name().to_string()
+            } else {
+                format!("{}({params})", tool.name())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }

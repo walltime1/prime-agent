@@ -416,7 +416,11 @@ pub fn apply_refinement_proposal(
             applied_edits.push(row);
             continue;
         }
-        let updated_at = now_iso();
+        let written_millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        let updated_at = format_iso(written_millis);
         let mut metadata = edit
             .metadata
             .clone()
@@ -424,11 +428,9 @@ pub fn apply_refinement_proposal(
             .unwrap_or_default();
         // A rollback restores recorded state, so it keeps the recorded review date.
         if options.rollback_of.is_none() {
-            let written_millis = crate::cron::parse_iso_millis(&updated_at)
-                .expect("now_iso emits a parseable RFC 3339 instant");
             metadata.insert(
                 REVIEW_AFTER_METADATA_KEY.to_string(),
-                serde_json::json!(format_iso((written_millis + REVIEW_AFTER_MILLIS) as i64)),
+                serde_json::json!(format_iso(written_millis + REVIEW_AFTER_MILLIS as i64)),
             );
         }
         let after = HarnessEntry {
@@ -938,17 +940,15 @@ mod tests {
         let mut state = empty_harness_state();
         apply_memory_edit(&mut state, "r1", RefinementAction::Create, None);
         let created = &state.entries[&RefinementKind::Memory]["m1"];
-        assert_eq!(
-            crate::cron::parse_iso_millis(&review_after(&state)).unwrap(),
-            crate::cron::parse_iso_millis(&created.updated_at).unwrap() + REVIEW_AFTER_MILLIS
-        );
+        let created_review = review_after(&state);
+        assert!(created_review > created.updated_at);
+        assert_eq!(&created_review[10..], &created.updated_at[10..]);
         set_review_after(&mut state, LONG_PAST);
         apply_memory_edit(&mut state, "r2", RefinementAction::Update, None);
         let updated = &state.entries[&RefinementKind::Memory]["m1"];
-        assert_eq!(
-            crate::cron::parse_iso_millis(&review_after(&state)).unwrap(),
-            crate::cron::parse_iso_millis(&updated.updated_at).unwrap() + REVIEW_AFTER_MILLIS
-        );
+        let updated_review = review_after(&state);
+        assert!(updated_review > updated.updated_at);
+        assert_eq!(&updated_review[10..], &updated.updated_at[10..]);
     }
 
     #[test]

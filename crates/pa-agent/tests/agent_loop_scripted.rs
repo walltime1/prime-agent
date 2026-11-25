@@ -457,11 +457,55 @@ async fn tool_error_produces_error_tool_result_and_loop_continues() {
     let result = tool_result(&state.messages[2]);
     assert!(result.is_error);
     assert_eq!(single_text(&result.content), "boom from bad_tool");
-    assert_eq!(state.messages.len(), 4);
+    assert_eq!(state.messages.len(), 5);
+    let memo = match &state.messages[3] {
+        AgentMessage::Standard(Message::User(user)) => match &user.content {
+            UserContent::Text(text) => text.clone(),
+            UserContent::Parts(_) => panic!("expected memo text, got parts"),
+        },
+        other => panic!("expected memo user message, got {other:?}"),
+    };
+    assert!(memo.contains("Memo: 1 of 1 tool call(s) failed."));
+    assert!(memo.contains("'bad_tool' failed: boom from bad_tool"));
+    assert!(memo.contains("Available tools: bad_tool(text)"));
     assert!(matches!(
-        &state.messages[3],
+        &state.messages[4],
         AgentMessage::Standard(Message::Assistant(_))
     ));
+}
+
+#[tokio::test]
+async fn repeated_tool_errors_emit_the_memo_only_once() {
+    let failing = EchoTool::with_options("bad_tool", 0, true);
+    let (agent, provider, _events) = scripted_agent(vec![failing.clone()]).await;
+    provider.push_tool_call_turn(
+        None,
+        vec![("call-1", "bad_tool", serde_json::json!({ "text": "x" }))],
+    );
+    provider.push_tool_call_turn(
+        None,
+        vec![("call-2", "bad_tool", serde_json::json!({ "text": "x" }))],
+    );
+    provider.push_text_turn("giving up");
+
+    agent.prompt("try the tool").await.unwrap();
+    agent.wait_for_idle().await;
+
+    assert_eq!(failing.calls.load(Ordering::SeqCst), 2);
+    let state = agent.state().await;
+    assert_eq!(state.messages.len(), 7);
+    let memos = state
+        .messages
+        .iter()
+        .filter(|message| match message {
+            AgentMessage::Standard(Message::User(user)) => match &user.content {
+                UserContent::Text(text) => text.starts_with("Memo:"),
+                UserContent::Parts(_) => false,
+            },
+            _ => false,
+        })
+        .count();
+    assert_eq!(memos, 1);
 }
 
 #[tokio::test]
@@ -544,6 +588,97 @@ async fn unknown_tool_name_yields_error_tool_result() {
     let result = tool_result(&state.messages[2]);
     assert!(result.is_error);
     assert_eq!(single_text(&result.content), "Tool nonexistent not found");
+    assert_eq!(state.messages.len(), 5);
+    let memo = match &state.messages[3] {
+        AgentMessage::Standard(Message::User(user)) => match &user.content {
+            UserContent::Text(text) => text.clone(),
+            UserContent::Parts(_) => panic!("expected memo text, got parts"),
+        },
+        other => panic!("expected memo user message, got {other:?}"),
+    };
+    assert!(memo.contains("'nonexistent' failed: Tool nonexistent not found"));
+    assert!(memo.contains("Available tools: echo(text)"));
+}
+
+#[tokio::test]
+async fn pseudo_tool_call_text_is_nudged_to_a_real_tool_call() {
+    let echo = EchoTool::new("echo");
+    let (agent, provider, _events) = scripted_agent(vec![echo.clone()]).await;
+    provider.push_text_turn(
+        "Use bash.\n<tool_call>{\"name\":\"bash\",\"args\":{\"code\":\"ls\"}}</tool_call>",
+    );
+    provider.push_tool_call_turn(
+        None,
+        vec![("call-1", "echo", serde_json::json!({ "text": "fixed" }))],
+    );
+    provider.push_text_turn("done");
+
+    agent.prompt("go").await.unwrap();
+    agent.wait_for_idle().await;
+
+    assert_eq!(echo.calls.load(Ordering::SeqCst), 1);
+    let state = agent.state().await;
+    assert_eq!(state.messages.len(), 6);
+    let memo = match &state.messages[2] {
+        AgentMessage::Standard(Message::User(user)) => match &user.content {
+            UserContent::Text(text) => text.clone(),
+            UserContent::Parts(_) => panic!("expected memo text, got parts"),
+        },
+        other => panic!("expected memo user message, got {other:?}"),
+    };
+    assert!(memo.contains("plain text"));
+    assert!(memo.contains("native function-calling"));
+    assert!(memo.contains("Available tools: echo(text)"));
+    assert!(!memo.contains("<tool_call>"));
+    let result = tool_result(&state.messages[4]);
+    assert!(!result.is_error);
+    assert_eq!(single_text(&result.content), "echo:fixed");
+}
+
+#[tokio::test]
+async fn repeated_pseudo_tool_call_text_stops_after_nudge_limit() {
+    let echo = EchoTool::new("echo");
+    let (agent, provider, _events) = scripted_agent(vec![echo.clone()]).await;
+    provider
+        .push_text_turn("<tool_call>{\"name\":\"bash\",\"args\":{\"code\":\"ls\"}}</tool_call>");
+    provider.push_text_turn(
+        "<tool_call>{\"name\":\"python_repl\",\"args\":{\"code\":\"ls\"}}</tool_call>",
+    );
+
+    agent.prompt("go").await.unwrap();
+    agent.wait_for_idle().await;
+
+    assert_eq!(echo.calls.load(Ordering::SeqCst), 0);
+    let state = agent.state().await;
+    assert_eq!(state.messages.len(), 4);
+    let memos = state
+        .messages
+        .iter()
+        .filter(|message| match message {
+            AgentMessage::Standard(Message::User(user)) => match &user.content {
+                UserContent::Text(text) => text.starts_with("Memo:"),
+                UserContent::Parts(_) => false,
+            },
+            _ => false,
+        })
+        .count();
+    assert_eq!(memos, 1);
+}
+
+#[tokio::test]
+async fn mentioning_the_marker_without_call_json_sends_no_memo() {
+    let echo = EchoTool::new("echo");
+    let (agent, provider, _events) = scripted_agent(vec![echo.clone()]).await;
+    provider.push_text_turn(
+        "Discussing the <tool_call> marker in prose, with no JSON call shaped text here.",
+    );
+
+    agent.prompt("go").await.unwrap();
+    agent.wait_for_idle().await;
+
+    assert_eq!(echo.calls.load(Ordering::SeqCst), 0);
+    let state = agent.state().await;
+    assert_eq!(state.messages.len(), 2);
 }
 
 #[tokio::test]

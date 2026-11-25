@@ -301,6 +301,11 @@ impl AgentSession {
         self.session.lock().await.get_session_id().to_string()
     }
 
+    /// Working directory recorded on the session.
+    pub(crate) async fn cwd(&self) -> std::path::PathBuf {
+        self.session.lock().await.get_cwd().to_path_buf()
+    }
+
     /// Restore a verified retained context without loading older transcript bodies.
     pub async fn restore_windowed_context(
         &self,

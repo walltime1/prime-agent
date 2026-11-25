@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use crate::abort::AbortSignal;
 use crate::types::{
-    AfterToolCallContext, AfterToolCallResult, AgentEvent, AgentMessage, BeforeToolCallContext,
-    BeforeToolCallResult, GetContinuationMessagesContext, Message, Model,
+    AfterToolCallContext, AfterToolCallResult, AgentContext, AgentEvent, AgentMessage,
+    BeforeToolCallContext, BeforeToolCallResult, GetContinuationMessagesContext, Message, Model,
     ShouldStopAfterTurnContext, ThinkingLevel, ToolExecutionMode,
 };
 
@@ -168,6 +168,14 @@ impl AgentLoopConfig {
                     .collect())
             })
         })
+    }
+}
+
+pub(crate) fn clone_context(context: &AgentContext) -> AgentContext {
+    AgentContext {
+        system_prompt: context.system_prompt.clone(),
+        messages: context.messages.clone(),
+        tools: context.tools.clone(),
     }
 }
 

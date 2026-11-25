@@ -417,6 +417,32 @@ compat: Some(RawCompat {
     },
     RawModel {
         provider: "huggingface",
+        id: "thinkingmachines/Inkling-2-Mini",
+        name: "Inkling 2 Mini",
+        api: "openai-completions",
+        base_url: "https://router.huggingface.co/v1",
+        reasoning: true,
+        thinking_levels: &[],
+        input: &[crate::types::ModelInput::Text, crate::types::ModelInput::Image],
+        cost: (0.0, 0.0, 0.0, 0.0),
+        context_window: 1_000_000,
+        max_tokens: 32_768,
+        featured: None,
+        headers: &[],
+        compat: Some(RawCompat {
+            supports_store: None,
+            supports_developer_role: Some(false),
+            supports_reasoning_effort: None,
+            max_tokens_field: None,
+            requires_reasoning_content_on_assistant_messages: None,
+            thinking_format: None,
+            zai_tool_stream: None,
+            send_session_affinity_headers: None,
+            supports_strict_mode: None,
+        }),
+    },
+    RawModel {
+        provider: "huggingface",
         id: "deepseek-ai/DeepSeek-R1",
         name: "DeepSeek-R1",
         api: "openai-completions",
@@ -429,7 +455,7 @@ compat: Some(RawCompat {
         max_tokens: 32_768,
         featured: None,
         headers: &[],
-compat: Some(RawCompat {
+        compat: Some(RawCompat {
             supports_store: None,
             supports_developer_role: Some(false),
             supports_reasoning_effort: None,
@@ -4487,7 +4513,7 @@ mod tests {
             .iter()
             .map(|provider| get_models(provider).len())
             .sum();
-        assert_eq!(total, 152, "the TS fallback model list");
+        assert_eq!(total, 153, "the TS fallback model list");
         assert_eq!(
             get_models("prime-inference").len(),
             110,

@@ -92,6 +92,14 @@ pub(super) fn star_key(row: &AgentsViewRow) -> Option<String> {
         .map(crate::agents_view_state::normalize_session_file_path)
 }
 
+/// Whether a toggle changed visibility filters enough to require rebuilding the row list.
+#[must_use]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RowListUpdate {
+    Unchanged,
+    NeedsRebuild,
+}
+
 impl AgentsViewMode {
     pub(super) fn is_starred(&self, row: &AgentsViewRow) -> bool {
         star_key(row).is_some_and(|file| self.stars.contains(&file))
@@ -103,31 +111,36 @@ impl AgentsViewMode {
     }
 
     /// `app.agents.star` (default ctrl+p): star or unstar the selected session.
-    pub(super) fn toggle_star_for_selected(&mut self) {
+    pub(super) fn toggle_star_for_selected(&mut self) -> RowListUpdate {
         let Some(file) = self.star_target() else {
             self.set_status("Only a saved top-level session can be starred");
-            return;
+            return RowListUpdate::Unchanged;
         };
         match self.stars.toggle(&file) {
             Ok(true) => {
                 self.actions.push("starred");
                 self.set_status("Starred");
+                RowListUpdate::Unchanged
             }
             Ok(false) => {
                 self.set_status("Unstarred");
                 // An unstar under the starred filter drops the row from the list.
                 if self.starred_only {
-                    self.rebuild_rows();
+                    RowListUpdate::NeedsRebuild
+                } else {
+                    RowListUpdate::Unchanged
                 }
             }
-            Err(error) => self.set_status(&format!("Could not save stars: {error}")),
+            Err(error) => {
+                self.set_status(&format!("Could not save stars: {error}"));
+                RowListUpdate::Unchanged
+            }
         }
     }
 
     /// `app.agents.starred` (default ctrl+s): list only the starred sessions, or all again.
-    pub(super) fn toggle_starred_only(&mut self) {
+    pub(super) fn toggle_starred_only(&mut self) -> RowListUpdate {
         self.starred_only = !self.starred_only;
-        self.rebuild_rows();
         let status = match (self.starred_only, self.stars.is_empty()) {
             (true, true) => "No starred sessions yet (ctrl+p stars the selected one)",
             (true, false) => {
@@ -137,6 +150,7 @@ impl AgentsViewMode {
             (false, _) => "Showing all sessions",
         };
         self.set_status(status);
+        RowListUpdate::NeedsRebuild
     }
 }
 

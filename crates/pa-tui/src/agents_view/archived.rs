@@ -4,7 +4,7 @@
 //! stay on disk. The archive persists as the archived session files in
 //! `<agent dir>/archived-sessions.json`, so it survives restarts and follows a session between
 //! its live and saved rows.
-use super::stars::{star_key, Stars};
+use super::stars::{star_key, RowListUpdate, Stars};
 use super::AgentsViewMode;
 use crate::agents_view_forest::AgentsViewRow;
 
@@ -57,29 +57,36 @@ impl AgentsViewMode {
     }
 
     /// `app.agents.archive` (default ctrl+a): archive or unarchive the selected session.
-    pub(super) fn toggle_archive_for_selected(&mut self) {
+    pub(super) fn toggle_archive_for_selected(&mut self) -> RowListUpdate {
         let Some(file) = self.rows.get(self.selected).and_then(star_key) else {
             self.set_status("Only a saved top-level session can be archived");
-            return;
+            return RowListUpdate::Unchanged;
         };
         match self.archived.toggle(&file) {
             Ok(true) => {
                 self.actions.push("archived");
                 self.set_status("Archived (ctrl+e shows archived sessions)");
                 // An archive while archived rows are hidden drops the row from the list.
-                if !self.show_archived {
-                    self.rebuild_rows();
+                if self.show_archived {
+                    RowListUpdate::Unchanged
+                } else {
+                    RowListUpdate::NeedsRebuild
                 }
             }
-            Ok(false) => self.set_status("Unarchived"),
-            Err(error) => self.set_status(&format!("Could not save archived sessions: {error}")),
+            Ok(false) => {
+                self.set_status("Unarchived");
+                RowListUpdate::Unchanged
+            }
+            Err(error) => {
+                self.set_status(&format!("Could not save archived sessions: {error}"));
+                RowListUpdate::Unchanged
+            }
         }
     }
 
     /// `app.agents.archived` (default ctrl+e): show the archived sessions, or hide them again.
-    pub(super) fn toggle_show_archived(&mut self) {
+    pub(super) fn toggle_show_archived(&mut self) -> RowListUpdate {
         self.show_archived = !self.show_archived;
-        self.rebuild_rows();
         let status = match (self.show_archived, self.archived.is_empty()) {
             (true, true) => "No archived sessions yet (ctrl+a archives the selected one)",
             (true, false) => {
@@ -89,5 +96,6 @@ impl AgentsViewMode {
             (false, _) => "Hiding archived sessions",
         };
         self.set_status(status);
+        RowListUpdate::NeedsRebuild
     }
 }

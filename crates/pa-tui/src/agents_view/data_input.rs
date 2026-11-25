@@ -583,22 +583,30 @@ impl AgentsViewMode {
         // keys, since a macOS terminal without option-as-meta has no Alt; neither types
         // search text, so both work while a query narrows the list.
         if self.keybindings.matches(key, "app.agents.star") {
-            self.toggle_star_for_selected();
+            if self.toggle_star_for_selected() == super::stars::RowListUpdate::NeedsRebuild {
+                self.rebuild_rows();
+            }
             return;
         }
         if self.keybindings.matches(key, "app.agents.starred") {
-            self.toggle_starred_only();
+            if self.toggle_starred_only() == super::stars::RowListUpdate::NeedsRebuild {
+                self.rebuild_rows();
+            }
             return;
         }
         // `app.agents.archive` (default ctrl+a) and `app.agents.archived` (default ctrl+e): the
         // search editor is append-only, so both Ctrl keys are free and work while a query
         // narrows the list.
         if self.keybindings.matches(key, "app.agents.archive") {
-            self.toggle_archive_for_selected();
+            if self.toggle_archive_for_selected() == super::stars::RowListUpdate::NeedsRebuild {
+                self.rebuild_rows();
+            }
             return;
         }
         if self.keybindings.matches(key, "app.agents.archived") {
-            self.toggle_show_archived();
+            if self.toggle_show_archived() == super::stars::RowListUpdate::NeedsRebuild {
+                self.rebuild_rows();
+            }
             return;
         }
         // `app.agents.rename` (default ctrl+r, empty editor only, before the delete arm):
