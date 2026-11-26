@@ -58,6 +58,28 @@ fn plain(src: &str) -> String {
     plain_lines(&render(src, &styles(), Some(120)).unwrap()).join("\n")
 }
 
+/// The graph as (from id, to id, label) triples, ids looked up through `index`, sorted.
+fn edge_ids(graph: &Graph) -> Vec<(String, String, Option<String>)> {
+    let ids: HashMap<usize, &str> = graph
+        .index
+        .iter()
+        .map(|(id, &i)| (i, id.as_str()))
+        .collect();
+    let mut out: Vec<(String, String, Option<String>)> = graph
+        .edges
+        .iter()
+        .map(|e| {
+            (
+                ids[&e.from].to_string(),
+                ids[&e.to].to_string(),
+                e.label.clone(),
+            )
+        })
+        .collect();
+    out.sort();
+    out
+}
+
 #[test]
 fn parses_nodes_edges_and_direction() {
     let g = parse_graph("flowchart LR\n  A[Start] --> B[End]").unwrap();
@@ -1667,4 +1689,114 @@ fn sequence_rows_are_rectangular_and_sentinel_free() {
     let out = plain("sequenceDiagram\n Alice->>Bob: hi\n Note over Alice: solo note");
     assert!(!out.contains(CONT), "sentinel leaked:\n{out}");
     assert!(out.contains("solo note"), "{out}");
+}
+
+#[test]
+fn hyphenated_flowchart_ids_stay_whole() {
+    let g = parse_graph(
+        "flowchart TD\n  pa-cli --> pa-types\n  pa-cli --> pa-core\n  pa-core --> pa-types",
+    )
+    .unwrap();
+    assert_eq!(
+        edge_ids(&g),
+        vec![
+            ("pa-cli".to_string(), "pa-core".to_string(), None),
+            ("pa-cli".to_string(), "pa-types".to_string(), None),
+            ("pa-core".to_string(), "pa-types".to_string(), None),
+        ]
+    );
+}
+
+#[test]
+fn hyphenated_decision_ids_keep_their_labels() {
+    let src = r#"flowchart TD
+    start-node["prompt submitted"] --> check-lock{"session lease held by another client?"}
+    check-lock -- yes --> reject-path["reply session_already_active"]
+    check-lock -- no --> check-model{"model allowed?"}
+    check-model -- no --> deny-model["reply allowlist error"]
+    check-model -- yes --> run-turn["stream turn"]
+    run-turn --> build-ok{"tool call in reply?"}
+    build-ok -- yes --> exec-tool{"tool confirmed safe?"}
+    exec-tool -- no --> blocked-error["emit error tool result"]
+    exec-tool -- yes --> run-tool["execute tool"]
+    run-tool --> run-turn
+    build-ok -- no --> ctx-check{"context over budget?"}
+    ctx-check -- yes --> do-compact["compact, then continue"]
+    do-compact --> run-turn
+    ctx-check -- no --> finish-ok["persist message, idle"]
+"#;
+    let g = parse_graph(src).unwrap();
+    let mut ids: Vec<&str> = g.index.keys().map(String::as_str).collect();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        [
+            "blocked-error",
+            "build-ok",
+            "check-lock",
+            "check-model",
+            "ctx-check",
+            "deny-model",
+            "do-compact",
+            "exec-tool",
+            "finish-ok",
+            "reject-path",
+            "run-tool",
+            "run-turn",
+            "start-node",
+        ]
+    );
+    let lock = &g.nodes[index_of(&g, "check-lock")];
+    assert_eq!(lock.label, "session lease held by another client?");
+    assert!(
+        lock.shape == Shape::Diamond,
+        "shape of check-lock is not a diamond"
+    );
+}
+
+#[test]
+fn quoted_edge_label_keeps_its_hyphen() {
+    let g = parse_graph("flowchart LR\n  CLI -- \"spawn/attach/control-plane commands\" --> SUP")
+        .unwrap();
+    assert_eq!(
+        edge_ids(&g),
+        vec![(
+            "CLI".to_string(),
+            "SUP".to_string(),
+            Some("spawn/attach/control-plane commands".to_string()),
+        )]
+    );
+}
+
+#[test]
+fn sequence_note_keeps_its_semicolon() {
+    let art = render(
+        "sequenceDiagram\n  A->>B: hi\n  Note over A,B: first; second",
+        &styles(),
+        Some(120),
+    )
+    .unwrap();
+    let lines = plain_lines(&art);
+    assert!(
+        !lines.iter().any(|l| l.contains("mermaid: sequenceDiagram")),
+        "fell back to the framed source:\n{}",
+        lines.join("\n")
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("first; second")),
+        "{}",
+        lines.join("\n")
+    );
+}
+
+#[test]
+fn flowchart_semicolons_still_split_statements() {
+    let g = parse_graph("flowchart LR\n  A-->B; B-->C").unwrap();
+    assert_eq!(
+        edge_ids(&g),
+        vec![
+            ("A".to_string(), "B".to_string(), None),
+            ("B".to_string(), "C".to_string(), None),
+        ]
+    );
 }

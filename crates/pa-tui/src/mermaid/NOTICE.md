@@ -7,5 +7,7 @@ Copyright 2023-2026 SpaceXAI. Licensed under the Apache License, Version 2.0 (se
 
 Local modifications: the upstream test module moved to `tests.rs`; Rust 2024 `let` chains were
 rewritten as nested `if let` for this edition-2021 workspace; the unused `MermaidArt::plain_lines`
-output was removed (the tests derive the same text from `styled_lines`); and the code was
-conformed to this workspace's rustfmt and clippy configuration.
+output was removed (the tests derive the same text from `styled_lines`); the flowchart parser keeps
+hyphens inside node ids and quoted edge labels, and sequence diagrams keep a `;` that follows a
+message's or note's `:`; and the code was conformed to this workspace's rustfmt and clippy
+configuration.

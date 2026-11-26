@@ -188,7 +188,7 @@ impl Graph {
 fn parse_graph(src: &str) -> Option<Graph> {
     let mut statements: Vec<String> = Vec::new();
     for raw_line in src.lines() {
-        split_statements(raw_line, &mut statements);
+        split_statements(raw_line, &mut statements, StatementSplit::Everywhere);
     }
 
     let header = statements.first()?;
@@ -282,9 +282,18 @@ fn parse_subgraph_decl(rest: &str) -> (String, String) {
     (rest.to_string(), rest.to_string())
 }
 
-fn split_statements(line: &str, out: &mut Vec<String>) {
+/// Where `;` ends a statement: everywhere (flowchart, state, class, ER), or only before the first
+/// unquoted `:` (sequence messages and notes, whose text after `:` may contain `;`).
+#[derive(Clone, Copy)]
+enum StatementSplit {
+    Everywhere,
+    BeforeColon,
+}
+
+fn split_statements(line: &str, out: &mut Vec<String>, split: StatementSplit) {
     let mut cur = String::new();
     let mut in_quotes = false;
+    let mut after_colon = false;
     let mut chars = line.chars().peekable();
     while let Some(c) = chars.next() {
         if in_quotes {
@@ -299,7 +308,13 @@ fn split_statements(line: &str, out: &mut Vec<String>) {
                     cur.push(c);
                 }
                 '%' if chars.peek() == Some(&'%') => break,
-                ';' => flush_statement(&mut cur, out),
+                ':' => {
+                    after_colon = true;
+                    cur.push(c);
+                }
+                ';' if matches!(split, StatementSplit::Everywhere) || !after_colon => {
+                    flush_statement(&mut cur, out);
+                }
                 _ => cur.push(c),
             }
         }
@@ -396,7 +411,9 @@ fn is_id_char(c: char) -> bool {
 fn parse_node(chars: &[char], start: usize, graph: &mut Graph) -> Option<(usize, usize)> {
     let mut i = skip_spaces(chars, start);
     let id_start = i;
-    while chars.get(i).copied().is_some_and(is_id_char) {
+    while chars.get(i).copied().is_some_and(|c| {
+        is_id_char(c) || (c == '-' && chars.get(i + 1).copied().is_some_and(is_id_char))
+    }) {
         i += 1;
     }
     if i == id_start {
@@ -699,6 +716,38 @@ fn parse_link(
     if right == Head::None {
         let text_start = skip_spaces(chars, i);
         let mut j = text_start;
+        if chars.get(j) == Some(&'"') {
+            j += 1;
+            while j < chars.len() && chars[j] != '"' {
+                j += 1;
+            }
+            if j < chars.len() {
+                j += 1;
+            }
+            let text_end = j;
+            j = skip_spaces(chars, j);
+            if j < chars.len() && is_link_char(chars[j]) {
+                let text: String = chars.get(text_start..text_end)?.iter().collect();
+                let right_op_start = j;
+                while j < chars.len() && chars.get(j).copied().is_some_and(is_link_char) {
+                    j += 1;
+                }
+                let op2: String = chars.get(right_op_start..j)?.iter().collect();
+                right = if op2.contains('>') {
+                    Head::Arrow
+                } else if let Some((head, nj)) = trailing_head(chars, j) {
+                    j = nj;
+                    head
+                } else {
+                    Head::None
+                };
+                if line == LineKind::Solid {
+                    line = line_kind(&op2);
+                }
+                return Some((left, right, line, non_empty(clean_label(&text)), j));
+            }
+            j = text_start;
+        }
         while j < chars.len() && chars.get(j).is_some_and(|&c| !is_link_char(c)) {
             j += 1;
         }
@@ -765,7 +814,7 @@ fn non_empty(s: String) -> Option<String> {
 fn parse_state(src: &str) -> Option<Graph> {
     let mut statements: Vec<String> = Vec::new();
     for raw_line in src.lines() {
-        split_statements(raw_line, &mut statements);
+        split_statements(raw_line, &mut statements, StatementSplit::Everywhere);
     }
     let header = statements.first()?;
     if !header
@@ -972,7 +1021,7 @@ struct ClassInfo {
 fn parse_class(src: &str) -> Option<(Graph, Vec<ClassInfo>)> {
     let mut statements: Vec<String> = Vec::new();
     for raw_line in src.lines() {
-        split_statements(raw_line, &mut statements);
+        split_statements(raw_line, &mut statements, StatementSplit::Everywhere);
     }
     let header = statements.first()?;
     if !header
@@ -1247,7 +1296,7 @@ fn display_generics(s: &str) -> String {
 fn parse_er(src: &str) -> Option<(Graph, Vec<ClassInfo>)> {
     let mut statements: Vec<String> = Vec::new();
     for raw_line in src.lines() {
-        split_statements(raw_line, &mut statements);
+        split_statements(raw_line, &mut statements, StatementSplit::Everywhere);
     }
     let header = statements.first()?;
     if !header
@@ -3423,7 +3472,7 @@ impl Sequence {
 fn parse_sequence(src: &str) -> Option<Sequence> {
     let mut statements: Vec<String> = Vec::new();
     for raw_line in src.lines() {
-        split_statements(raw_line, &mut statements);
+        split_statements(raw_line, &mut statements, StatementSplit::BeforeColon);
     }
     let header = statements.first()?;
     if !header

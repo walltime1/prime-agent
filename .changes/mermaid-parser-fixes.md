@@ -1,0 +1,1 @@
+- Mermaid diagrams in the chat now handle hyphenated node ids (such as pa-cli), hyphens inside quoted edge labels, and semicolons in sequence-diagram notes and messages, which previously produced wrong graphs or no diagram.
