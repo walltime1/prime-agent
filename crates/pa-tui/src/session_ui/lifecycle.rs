@@ -76,6 +76,7 @@ impl SessionUi {
             heartbeat_updates: activity_updates.heartbeats,
             telemetry_disabled: options.telemetry_disabled,
             code_block_indent: options.code_block_indent.clone(),
+            mermaid_mode: options.mermaid_mode,
             tree_filter_mode: crate::tree_list::filter_mode_from_str(&options.tree_filter_mode),
             branch_summary_skip_prompt: options.branch_summary_skip_prompt,
             last_status_index: None,

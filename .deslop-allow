@@ -141,6 +141,10 @@ field-leak pa_tui::goal_surface::GoalView::last_status_index
 field-leak pa_tui::mcp_view::rows::McpServiceRow::aliases
 field-leak pa_tui::mcp_view::rows::McpServiceRow::description
 field-leak pa_tui::mcp_view::rows::McpServiceRow::setup_hint
+field-leak pa_tui::mermaid::Canvas::ch
+field-leak pa_tui::mermaid::Canvas::cur_style
+field-leak pa_tui::mermaid::Canvas::mask
+field-leak pa_tui::mermaid::Canvas::occupied
 field-leak pa_tui::model_picker::ModelPicker::render_width
 field-leak pa_tui::model_picker::ModelPicker::visible_items
 field-leak pa_tui::session_ui::SessionUi::client
@@ -177,6 +181,7 @@ field-leak pa_tui::view::AgentView::goal_panel
 field-leak pa_tui::view::AgentView::heartbeats_picker
 field-leak pa_tui::view::AgentView::info_panel
 field-leak pa_tui::view::AgentView::mcp_view
+field-leak pa_tui::view::AgentView::mermaid_mode
 field-leak pa_tui::view::AgentView::model_picker
 field-leak pa_tui::view::AgentView::older_history_loading
 field-leak pa_tui::view::AgentView::onboarding
@@ -232,4 +237,5 @@ long-file crates/pa-daemon/src/acp/daemon.rs
 long-file crates/pa-daemon/src/rlm_children/watch_tests.rs
 long-file crates/pa-daemon/src/supervisor/tests.rs
 long-file crates/pa-tui/src/factory_view/tests.rs
+long-file crates/pa-tui/src/mermaid.rs
 long-file crates/pa-tui/src/snapshot/tests.rs

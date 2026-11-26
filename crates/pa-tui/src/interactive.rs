@@ -303,6 +303,8 @@ pub trait InteractionTelemetry: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
     /// A tool call started executing with a live timer; counted on `tui exit`.
     fn live_tool_timer_started(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
+    /// Count assistant messages that settled with a mermaid diagram while diagram rendering is on.
+    fn mermaid_rendered(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 }
 
 /// The `--workspace` choice for the first session this process attaches (a
@@ -355,6 +357,8 @@ pub struct InteractiveOptions {
     pub theme: String,
     /// The chat markdown fenced-code indent (`markdown.codeBlockIndent`, default two spaces).
     pub code_block_indent: String,
+    /// The `markdown.mermaid` setting: how `mermaid` code fences render.
+    pub mermaid_mode: crate::markdown::MermaidMode,
     /// The `/tree` selector's initial filter mode (the `treeFilterMode` setting, default view).
     pub tree_filter_mode: String,
     /// The `branchSummary.skipPrompt` setting: `/tree` navigation skips the "Summarize branch?"
@@ -421,6 +425,7 @@ impl std::fmt::Debug for InteractiveOptions {
             .field("initial_message", &self.initial_message)
             .field("theme", &self.theme)
             .field("code_block_indent", &self.code_block_indent)
+            .field("mermaid_mode", &self.mermaid_mode)
             .field("version", &self.version)
             .field("onboarding", &self.onboarding)
             .field("telemetry_disabled", &self.telemetry_disabled)

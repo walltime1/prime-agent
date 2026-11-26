@@ -569,8 +569,11 @@ impl SessionUi {
                 if let Some(settings) = &self.client_settings {
                     if let Err(error) = settings.set_mermaid_rendering_mode(value) {
                         self.error_row(&format!("{error:#}"), view);
+                        return;
                     }
                 }
+                self.mermaid_mode = crate::markdown::MermaidMode::from_setting(value);
+                view.mermaid_mode = self.mermaid_mode;
             }
             "quiet-startup" => {
                 self.persist_bool_setting(

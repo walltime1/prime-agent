@@ -8,7 +8,14 @@ use crate::chrome::render_splash;
 use crate::Line;
 
 /// Inputs shared by local entry caches and cross-view handoffs.
-pub(super) type LayoutOptions = (crate::theme::Theme, String, bool, bool, Option<url::Url>);
+pub(super) type LayoutOptions = (
+    crate::theme::Theme,
+    String,
+    crate::markdown::MermaidMode,
+    bool,
+    bool,
+    Option<url::Url>,
+);
 
 #[cfg(test)]
 thread_local! {
@@ -334,6 +341,7 @@ impl AgentView {
         let options = (
             self.theme.clone(),
             self.code_block_indent.clone(),
+            self.mermaid_mode,
             self.show_images,
             crate::image_component::fullscreen_image_fallback_active(),
             url::Url::from_directory_path(&self.chrome.cwd).ok(),

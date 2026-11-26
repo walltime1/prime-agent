@@ -1013,6 +1013,7 @@ const TUI_EXIT: EventRule = EventRule {
         ("turn_active", required(boolean())),
         ("tui_scroll_count", optional(count())),
         ("tui_live_tool_timer_count", optional(count())),
+        ("tui_mermaid_rendered_count", optional(count())),
         ("tui_selection_count", optional(count())),
         ("tui_click_count", optional(count())),
         ("tui_menu_open_count", optional(count())),

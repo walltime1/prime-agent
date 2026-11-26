@@ -340,6 +340,7 @@ impl SessionUi {
             telemetry_disabled: self.telemetry_disabled,
             theme: String::new(),
             code_block_indent: self.code_block_indent.clone(),
+            mermaid_mode: self.mermaid_mode,
             show_images: self.show_images,
             fullscreen_mouse: self.fullscreen_mouse,
             tree_filter_mode: self.tree_filter_mode.wire_name().to_string(),

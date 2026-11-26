@@ -856,6 +856,20 @@ impl SessionUi {
         } else {
             self.working_tokens.settle(usage_output);
             self.record_speed_sample(message, view);
+            let has_mermaid_fence = blocks.iter().any(|block| match block {
+                MessageBlock::Text(text) => text.lines().any(|line| {
+                    let fence = line.trim_start();
+                    fence.starts_with("```mermaid") || fence.starts_with("~~~mermaid")
+                }),
+                MessageBlock::Thinking(_) => false,
+            });
+            if has_mermaid_fence && self.mermaid_mode != crate::markdown::MermaidMode::Off {
+                if let Some(telemetry) = self.telemetry.clone() {
+                    tokio::spawn(async move {
+                        telemetry.mermaid_rendered().await;
+                    });
+                }
+            }
         }
         if let Some(text) = blocks.iter().rev().find_map(|block| match block {
             MessageBlock::Text(text) => Some(text.clone()),

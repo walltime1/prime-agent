@@ -1,0 +1,1 @@
+- Mermaid code blocks in assistant replies now render as Unicode diagrams in the chat (class, sequence, state, flowchart and ER diagrams); /settings → Mermaid diagrams switches between drawing them while streaming, only once the reply finishes, or off.

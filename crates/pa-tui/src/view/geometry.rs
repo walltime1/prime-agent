@@ -36,7 +36,7 @@ impl AgentView {
                     message,
                     detail,
                     &self.theme,
-                    &self.code_block_indent,
+                    &self.assistant_markdown_style(message),
                     width,
                     preceded_by_tool,
                     caches.get(&index).unwrap_or(&empty),
@@ -142,6 +142,7 @@ mod tests {
         AssistantMessage, Detail, MessageBlock, StatusKind, ToolCallCard, ToolResultView,
     };
     use crate::custom_message::*;
+    use crate::markdown::MermaidMode;
     use crate::theme::{ColorMode, Theme};
     use proptest::prelude::*;
     use proptest::test_runner::RngSeed;
@@ -158,6 +159,8 @@ mod tests {
                 "1. item", "10. item", "> quote", "# Heading", "---",
                 "    indented", "/model --flag @src/a.rs",
                 "| a | b |\n|---|---|",
+                "```mermaid", "sequenceDiagram", "classDiagram", "stateDiagram-v2",
+                "  A->>B: hi", "  A <|-- B", "  [*] --> S1", "  S1 --> S2: go",
                 "[link](https://example.com) **bold**",
                 "\u{1b}]8;;https://example.com\u{7}link\u{1b}]8;;\u{7} tail",
                 "\u{1b}[31mred\u{1b}[0m",
@@ -393,10 +396,14 @@ mod tests {
             indent in prop::sample::select(vec!["", "  "]),
             color in prop::sample::select(vec![ColorMode::TrueColor, ColorMode::Color256]),
             show_images in any::<bool>(),
+            mermaid_mode in prop::sample::select(vec![
+                MermaidMode::Off, MermaidMode::Final, MermaidMode::Streaming,
+            ]),
         ) {
             let mut view = AgentView::new(Theme::builtin("prime", color));
             view.detail = detail;
             view.show_images = show_images;
+            view.mermaid_mode = mermaid_mode;
             indent.clone_into(&mut view.code_block_indent);
             for entry in entries {
                 view.push_entry(entry);
@@ -413,5 +420,57 @@ mod tests {
                 prop_assert_eq!(view.count_entry_rows(index, width), cold);
             }
         }
+    }
+
+    // `markdown.mermaid = final`: the open message keeps its fence as code,
+    // and the same entry draws the diagram once it settles.
+    #[test]
+    fn final_mode_draws_the_mermaid_diagram_once_the_message_settles() {
+        let mut view = AgentView::new(Theme::builtin("prime", ColorMode::TrueColor));
+        view.mermaid_mode = MermaidMode::Final;
+        view.push_entry(ChatEntry::Assistant(Box::new(AssistantMessage {
+            blocks: vec![MessageBlock::Text(
+                "```mermaid\nsequenceDiagram\n  A->>B: hi\n```".to_string(),
+            )],
+            has_tool_calls: false,
+            streaming: true,
+            error: None,
+            aborted: false,
+        })));
+        let visible_rows = |view: &AgentView| -> Vec<String> {
+            view.render_entry(0, &view.chat[0], 40, true, false)
+                .iter()
+                .map(|row| {
+                    let text: String = row.iter().map(|span| span.content.as_str()).collect();
+                    crate::ansi::strip_ansi(&text).trim_end().to_string()
+                })
+                .collect()
+        };
+        assert_eq!(
+            visible_rows(&view),
+            ["", "   sequenceDiagram", "     A->>B: hi"]
+        );
+
+        view.prepare_entry_mutation(0);
+        if let Some(ChatEntry::Assistant(open)) = view.chat.get_mut(0) {
+            open.streaming = false;
+        }
+        view.mark_entry_stale(0);
+        assert_eq!(
+            visible_rows(&view),
+            [
+                "",
+                "   ┌───┐  ┌───┐",
+                "   │ A │  │ B │",
+                "   └─┬─┘  └─┬─┘",
+                "     │      │",
+                "     │  hi  │",
+                "     ├─────▶│",
+                "     │      │",
+                "   ┌─┴─┐  ┌─┴─┐",
+                "   │ A │  │ B │",
+                "   └───┘  └───┘",
+            ]
+        );
     }
 }

@@ -196,6 +196,7 @@ pub(crate) struct SessionUi {
     next_image_marker_id: u64,
     telemetry_disabled: Option<bool>,
     code_block_indent: String,
+    mermaid_mode: crate::markdown::MermaidMode,
     tree_filter_mode: crate::tree_list::FilterMode,
     branch_summary_skip_prompt: bool,
     /// The transcript index of the last `note` status row: consecutive

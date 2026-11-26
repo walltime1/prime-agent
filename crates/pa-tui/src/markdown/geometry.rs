@@ -91,15 +91,7 @@ pub(crate) fn markdown_row_count_tagged(
         total += usize::from(block.sep_blank);
         // The key build clones the block's lines, so an empty cache skips it.
         let cached = (!cache.0.is_empty())
-            .then(|| {
-                block_cache_key(
-                    style_tag,
-                    &blocks,
-                    index,
-                    width,
-                    style.link_base_url.as_ref(),
-                )
-            })
+            .then(|| block_cache_key(style_tag, &blocks, index, width, style))
             .flatten()
             .and_then(|key| cache.0.get(&key));
         if let Some(rows) = cached {
@@ -114,7 +106,7 @@ pub(crate) fn markdown_row_count_tagged(
             }
             BlockKind::Hr => 1,
             BlockKind::Code { lang } => {
-                code_rows(block, lang.as_deref(), style)
+                code_rows(block, lang.as_deref(), width, style)
                     .iter()
                     .map(|row| wrapped_span_count(row, width))
                     .sum::<usize>()

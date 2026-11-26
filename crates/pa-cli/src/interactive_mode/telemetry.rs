@@ -177,6 +177,11 @@ impl pa_tui::interactive::InteractionTelemetry for CliInteractionTelemetry {
         Box::pin(std::future::ready(()))
     }
 
+    fn mermaid_rendered(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        self.count("tui_mermaid_rendered_count");
+        Box::pin(std::future::ready(()))
+    }
+
     fn scroll_used(
         &self,
         _action: &'static str,

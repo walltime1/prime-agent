@@ -471,6 +471,7 @@ fn child_options(socket: PathBuf) -> InteractiveOptions {
         fullscreen_mouse: true,
         theme: "prime".to_string(),
         code_block_indent: "  ".to_string(),
+        mermaid_mode: pa_tui::markdown::MermaidMode::Streaming,
         tree_filter_mode: String::new(),
         branch_summary_skip_prompt: false,
         version: "0.0.0".to_string(),

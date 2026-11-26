@@ -458,6 +458,8 @@ fn build_tui_options(
     let config = &options.config;
     let settings = pa_core::settings::SettingsManager::create(&config.cwd, &config.agent_dir);
     let code_block_indent = settings.get_code_block_indent();
+    let mermaid_mode =
+        pa_tui::markdown::MermaidMode::from_setting(settings.get_mermaid_rendering_mode());
     let show_images = settings.get_show_images();
     let fullscreen_mouse = settings.get_fullscreen_mouse();
     let tree_filter_mode = settings.get_tree_filter_mode();
@@ -487,6 +489,7 @@ fn build_tui_options(
     });
     let tui_options_value = InteractiveOptions {
         code_block_indent,
+        mermaid_mode,
         tree_filter_mode,
         branch_summary_skip_prompt,
         model_catalog: catalog,

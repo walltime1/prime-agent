@@ -7,9 +7,44 @@ mod geometry;
 pub(crate) use geometry::{markdown_row_count, markdown_row_count_tagged};
 mod inline;
 #[cfg(test)]
+mod mermaid_tests;
+#[cfg(test)]
 mod tests;
 
 pub use inline::render_inline;
+
+/// How `mermaid` code fences in assistant text render (`markdown.mermaid` setting).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MermaidMode {
+    /// Always as plain code.
+    Off,
+    /// As a diagram once the message has finished streaming.
+    Final,
+    /// As a diagram while streaming too (the setting's default).
+    #[default]
+    Streaming,
+}
+
+impl MermaidMode {
+    /// Parse the persisted setting value; unknown values fall back to the default.
+    #[must_use]
+    pub fn from_setting(value: &str) -> Self {
+        match value {
+            "off" => Self::Off,
+            "final" => Self::Final,
+            _ => Self::Streaming,
+        }
+    }
+
+    /// Whether an assistant message in this streaming state draws its fences as diagrams.
+    pub(crate) fn draws_diagrams(self, message_streaming: bool) -> bool {
+        match self {
+            Self::Off => false,
+            Self::Final => !message_streaming,
+            Self::Streaming => true,
+        }
+    }
+}
 
 use crate::width::str_width;
 use crate::{Line, Span};
@@ -41,6 +76,8 @@ pub struct MarkdownStyle {
     /// — the TS no-valid-language fallback, and the quiet thinking theme.
     pub(crate) syntax: Option<crate::tool_card::highlight::SyntaxPalette>,
     pub(crate) link_base_url: Option<url::Url>,
+    /// Draw `mermaid` code fences as Unicode diagrams (assistant text only, per [`MermaidMode`]).
+    pub(crate) mermaid: bool,
 }
 
 impl Default for MarkdownStyle {
@@ -79,6 +116,7 @@ impl MarkdownStyle {
                 theme,
             )),
             link_base_url: None,
+            mermaid: false,
         }
     }
 }
@@ -113,13 +151,7 @@ pub fn render_markdown_tagged(
         if block.sep_blank {
             lines.push(Vec::new());
         }
-        let key = block_cache_key(
-            style_tag,
-            &blocks,
-            i,
-            content_width,
-            style.link_base_url.as_ref(),
-        );
+        let key = block_cache_key(style_tag, &blocks, i, content_width, style);
         if let Some(cached) = key.as_ref().and_then(|key| cache.0.get(key)) {
             lines.extend_from_slice(cached);
             continue;
@@ -164,6 +196,7 @@ pub struct MarkdownBlockCache(std::collections::HashMap<BlockKey, Vec<Line>>);
 #[derive(PartialEq, Eq, Hash)]
 struct BlockKey {
     link_base_url: Option<url::Url>,
+    mermaid: bool,
     style_tag: String,
     width: usize,
     kind: BlockKind,
@@ -180,7 +213,7 @@ fn block_cache_key(
     blocks: &[Block],
     index: usize,
     width: usize,
-    link_base_url: Option<&url::Url>,
+    style: &MarkdownStyle,
 ) -> Option<BlockKey> {
     if index + 1 == blocks.len() {
         return None;
@@ -188,7 +221,8 @@ fn block_cache_key(
     let next = blocks.get(index + 1);
     let block = &blocks[index];
     Some(BlockKey {
-        link_base_url: link_base_url.cloned(),
+        link_base_url: style.link_base_url.clone(),
+        mermaid: style.mermaid,
         style_tag: style_tag.to_string(),
         width,
         kind: block.kind.clone(),
@@ -667,9 +701,36 @@ fn highlighted_code_lines(
 
 /// The block's unwrapped rows (TS `renderCodeBlock`): the indent outside
 /// each highlighted or uniform code line; an empty block is one indented
-/// empty row. Paint wraps these rows and the count measures the same rows.
-fn code_rows(block: &Block, lang: Option<&str>, style: &MarkdownStyle) -> Vec<Line> {
+/// empty row. A mermaid fence under [`MarkdownStyle::mermaid`] is instead the
+/// indented diagram, laid out to fit `width`. Paint wraps these rows and the
+/// count measures the same rows.
+fn code_rows(block: &Block, lang: Option<&str>, width: usize, style: &MarkdownStyle) -> Vec<Line> {
     let indent = style.code_block_indent.as_str();
+    if style.mermaid && lang.is_some_and(|lang| lang.eq_ignore_ascii_case("mermaid")) {
+        let diagram_styles = crate::mermaid::MermaidStyles {
+            border: style.code_block_border,
+            node_text: style.code_block,
+            edge: style.hr,
+            edge_label: style.quote,
+            title: style.heading,
+        };
+        let max_width = width.saturating_sub(str_width(indent)).max(1);
+        if let Some(art) =
+            crate::mermaid::render(&block.lines.join("\n"), &diagram_styles, Some(max_width))
+        {
+            return art
+                .styled_lines
+                .into_iter()
+                .map(|line| {
+                    let mut row: Line = vec![Span::raw(indent)];
+                    row.extend(line.spans.into_iter().map(|span| {
+                        Span::styled(span.content.into_owned(), line.style.patch(span.style))
+                    }));
+                    row
+                })
+                .collect();
+        }
+    }
     let lines = highlighted_code_lines(block, lang, style).unwrap_or_else(|| {
         block
             .lines
@@ -769,7 +830,7 @@ fn render_block(
             // both sides. TS `renderBlock` then wraps every code row
             // (wrapTextWithAnsi), so a continuation row starts at column 0
             // with no re-added indent.
-            for row in code_rows(block, lang.as_deref(), style) {
+            for row in code_rows(block, lang.as_deref(), width, style) {
                 wrap_spans(&row, width, out);
             }
             if blank_after(false) {

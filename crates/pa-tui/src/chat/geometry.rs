@@ -41,6 +41,8 @@ pub(super) fn thinking_style(md: &MarkdownStyle, theme: &Theme) -> MarkdownStyle
     // TS `getThinkingMarkdownTheme` replaces `highlightCode` with uniform
     // dim lines: the thinking code blocks never highlight.
     md.syntax = None;
+    // TS transforms mermaid fences in text blocks only, never in thinking.
+    md.mermaid = false;
     md.body = dim;
     md.heading = dim;
     md.link = dim;
@@ -71,26 +73,24 @@ pub(crate) fn assistant_row_count(
     message: &AssistantMessage,
     detail: Detail,
     theme: &Theme,
-    code_block_indent: &str,
+    md: &MarkdownStyle,
     width: usize,
     preceded_by_tool_activity: bool,
     cache: &MarkdownBlockCache,
 ) -> usize {
     let blocks = visible_blocks(message, detail);
     let mut count = usize::from(!blocks.is_empty());
-    let mut md = MarkdownStyle::from_theme(theme);
-    code_block_indent.clone_into(&mut md.code_block_indent);
     let content_width = width.saturating_sub(2).max(1);
     for (index, block) in blocks.iter().enumerate() {
         match block {
             MessageBlock::Text(text) => {
-                count += markdown_row_count_tagged(text.trim(), content_width, &md, "", cache);
+                count += markdown_row_count_tagged(text.trim(), content_width, md, "", cache);
             }
             MessageBlock::Thinking(text) => {
                 count += markdown_row_count_tagged(
                     text.trim(),
                     content_width,
-                    &thinking_style(&md, theme),
+                    &thinking_style(md, theme),
                     THINKING_CACHE_TAG,
                     cache,
                 );

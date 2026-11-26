@@ -5,7 +5,8 @@
 
 use super::AgentView;
 use crate::chat::{
-    render_assistant_with_style, render_text_rows, render_user_block_with_style, ChatEntry,
+    render_assistant_with_style, render_text_rows, render_user_block_with_style, AssistantMessage,
+    ChatEntry,
 };
 use crate::theme::ThemeColor;
 use crate::Line;
@@ -22,6 +23,18 @@ enum SpacingContent {
 }
 
 impl AgentView {
+    /// An assistant entry's markdown context, shared by its paint and its row count.
+    pub(super) fn assistant_markdown_style(
+        &self,
+        message: &AssistantMessage,
+    ) -> crate::markdown::MarkdownStyle {
+        let mut md = crate::markdown::MarkdownStyle::from_theme(&self.theme);
+        md.code_block_indent.clone_from(&self.code_block_indent);
+        md.link_base_url = url::Url::from_directory_path(&self.chrome.cwd).ok();
+        md.mermaid = self.mermaid_mode.draws_diagrams(message.streaming);
+        md
+    }
+
     /// TS `createConversationSpacing.shouldAddLeadingSpace` for one spacing-driven custom row:
     /// scan back over entries that contribute no rows at this detail level, then apply the rules.
     pub(super) fn conversation_leading(&self, index: usize, expanded: bool) -> bool {
@@ -167,9 +180,7 @@ impl AgentView {
                 rows
             }
             ChatEntry::Assistant(message) => {
-                let mut md = crate::markdown::MarkdownStyle::from_theme(&self.theme);
-                md.code_block_indent.clone_from(&self.code_block_indent);
-                md.link_base_url = url::Url::from_directory_path(&self.chrome.cwd).ok();
+                let md = self.assistant_markdown_style(message);
                 // The per-entry block cache (TS's per-component `blockCache`): a streaming
                 // message's settled blocks replay per frame; a settled message drops the copy.
                 if message.streaming {
