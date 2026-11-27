@@ -56,6 +56,7 @@ pub mod platform;
 pub mod prompts;
 pub mod refinement;
 pub mod resources;
+pub mod sandbox;
 pub mod session;
 pub mod session_engine;
 pub mod settings;

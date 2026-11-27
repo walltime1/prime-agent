@@ -74,6 +74,8 @@ fn manager_options(
         session_id: Some("kernel-bench".to_string()),
         host_handlers: HostRequestHandlers::new(),
         python_skills: bench_python_skills(),
+        sandbox: None,
+        on_sandbox_started: None,
         on_background_work_settled: None,
         snapshot: snapshot_dir.map(|dir| KernelSnapshotConfig {
             path: snapshot_path_in(dir),

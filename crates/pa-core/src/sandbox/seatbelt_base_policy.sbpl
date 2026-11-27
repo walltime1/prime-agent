@@ -1,0 +1,40 @@
+(version 1)
+; Closed by default: every right the sandboxed kernel holds comes from this
+; base plus the generated sections appended after it.
+(deny default)
+
+; Process lifecycle: the kernel forks and execs its shell commands.
+(allow process-exec)
+(allow process-fork)
+(allow signal (target same-sandbox))
+(allow process-info* (target same-sandbox))
+
+; dyld stats the filesystem root before resolving any image (Apple's own
+; dyld-support.sb grants exactly this); without it CPython aborts at startup.
+(allow file-read* (literal "/"))
+
+; Directory metadata everywhere, so path traversal works. Content reads are
+; still confined to the policy's roots (the @HOME@ deny below re-removes the
+; home tree even from this metadata allowance's descendants).
+(allow file-read-metadata)
+
+; CPU/host facts the interpreter reads.
+(allow sysctl-read)
+
+; Device nodes the kernel opens for its stdio plumbing.
+(allow file-read* (literal "/dev/null"))
+(allow file-write* (literal "/dev/null"))
+
+; The interpreter's device sinks.
+(allow file-write-data
+  (literal "/dev/null")
+  (literal "/dev/stdout")
+  (literal "/dev/stderr"))
+(allow file-ioctl
+  (literal "/dev/tty")
+  (literal "/dev/null"))
+
+; Logging services dyld and libc contact during startup.
+(allow mach-lookup
+  (global-name "com.apple.system.logger")
+  (global-name "com.apple.system.notification_center"))

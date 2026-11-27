@@ -286,6 +286,12 @@ where
     Arc::new(move |payload| Box::pin(f(payload)) as HostHandlerFuture)
 }
 
+/// Reports a sandboxed kernel start: the backend and the effective mode,
+/// network posture, and env-scrub flag. Called synchronously and must not
+/// block.
+pub type SandboxStartedCallback =
+    Arc<dyn Fn(pa_types::sandbox::SandboxBackend, &crate::sandbox::SandboxPolicy) + Send + Sync>;
+
 /// Host request handlers keyed by request type (e.g. `rlm.run`, `goal.complete`).
 #[derive(Clone, Default)]
 pub struct HostRequestHandlers {
@@ -358,6 +364,12 @@ pub struct KernelManagerOptions {
     pub session_id: Option<String>,
     pub host_handlers: HostRequestHandlers,
     pub python_skills: Vec<KernelPythonSkill>,
+    /// The session's OS sandbox policy; `None` spawns the interpreter
+    /// unbounded.
+    pub sandbox: Option<crate::sandbox::SandboxPolicy>,
+    /// Announces a sandboxed kernel start (telemetry; never awaited on the
+    /// boot path).
+    pub on_sandbox_started: Option<SandboxStartedCallback>,
     /// Fires when the last live background `bash()` handle settles (its activity
     /// track empties or the kernel tears down), so owed continuations can resume.
     pub on_background_work_settled: Option<BackgroundWorkSettledCallback>,

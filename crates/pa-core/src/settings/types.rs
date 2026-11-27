@@ -1,6 +1,7 @@
 //! Settings types. All fields optional; JSON values of the wrong type load
 //! as `None` (the TS access-time typechecks), never a load error.
 
+use pa_types::sandbox::{SandboxMode, SandboxNetworkMode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -285,6 +286,76 @@ pub struct TelemetrySettings {
     pub local_mirror: Option<bool>,
 }
 
+/// OS-level sandbox boundary (global settings only; project overrides are stripped at
+/// load — see the scrub in `settings/manager.rs`). Unset means Off; the accessor is
+/// [`Settings::sandbox_mode`].
+///
+/// Semantics (the sandbox layer in pa-core owns enforcement):
+/// - `mode`: the posture; unset reads as off.
+/// - `network`: the network posture; unset means deny network.
+/// - `extra_read_roots` / `extra_write_roots`: explicit additional roots the boundary
+///   allows; the workspace itself is always allowed for reads (and writes in
+///   workspace-write mode).
+/// - `scrub_env`: whether the kernel launch env is scrubbed (default: scrubbed).
+/// - `protect_vcs`: whether `.git` and other VCS metadata are protected from writes.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxSettings {
+    /// The sandbox posture; unset reads as [`SandboxMode::Off`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<SandboxMode>,
+    /// The network posture; unset means deny network.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network: Option<SandboxNetworkMode>,
+    /// Additional roots the boundary allows for reads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra_read_roots: Option<Vec<String>>,
+    /// Additional roots the boundary allows for writes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra_write_roots: Option<Vec<String>>,
+    /// Whether the kernel launch environment is scrubbed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scrub_env: Option<bool>,
+    /// Whether VCS metadata is protected from writes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protect_vcs: Option<bool>,
+}
+
+/// Parse the `PRIME_AGENT_SANDBOX_MODE` override value: the documented kebab-case
+/// vocabulary (`off`, `read-only`, `workspace-write`, `danger-full-access`), matched
+/// case- and whitespace-insensitively. Unknown values return `None`: an invalid
+/// override falls back to settings, never panics.
+fn parse_sandbox_mode_override(value: &str) -> Option<SandboxMode> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "off" => Some(SandboxMode::Off),
+        "read-only" => Some(SandboxMode::ReadOnly),
+        "workspace-write" => Some(SandboxMode::WorkspaceWrite),
+        "danger-full-access" => Some(SandboxMode::DangerFullAccess),
+        _ => None,
+    }
+}
+
+/// The env override (`PRIME_AGENT_SANDBOX_MODE`), if set to a recognized value.
+fn sandbox_mode_from_env() -> Option<SandboxMode> {
+    let value = std::env::var("PRIME_AGENT_SANDBOX_MODE").ok()?;
+    parse_sandbox_mode_override(&value)
+}
+
+impl Settings {
+    /// The effective sandbox mode: the `PRIME_AGENT_SANDBOX_MODE` env override wins
+    /// (unknown values are ignored), else `sandbox.mode`, else [`SandboxMode::Off`].
+    #[must_use]
+    pub fn sandbox_mode(&self) -> SandboxMode {
+        sandbox_mode_from_env().unwrap_or_else(|| {
+            self.sandbox
+                .as_ref()
+                .and_then(|sandbox| sandbox.mode)
+                .unwrap_or(SandboxMode::Off)
+        })
+    }
+}
+
 /// The default time limit for user `python_repl` cells: 60 seconds.
 pub const DEFAULT_PYTHON_CELL_TIMEOUT_MS: u64 = 60_000;
 
@@ -370,6 +441,9 @@ pub struct Settings {
     pub emoji_shortcodes: Option<bool>,
     pub markdown: Option<MarkdownSettings>,
     pub warnings: Option<WarningSettings>,
+    /// OS-level sandbox boundary; global settings only (project overrides are
+    /// stripped). Unset means [`SandboxMode::Off`].
+    pub sandbox: Option<SandboxSettings>,
     /// Session storage can restore executable kernel state, so only global
     /// settings (or an explicit CLI/environment override) may select it.
     pub session_dir: Option<String>,
@@ -379,4 +453,101 @@ pub struct Settings {
     /// Unknown keys survive load/save round-trips (forward compatibility).
     #[serde(flatten, skip_serializing_if = "serde_json::Map::is_empty")]
     pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sandbox_settings_load_as_camel_case_and_skip_unset_fields() {
+        let settings: Settings = serde_json::from_value(serde_json::json!({
+            "sandbox": {
+                "mode": "read-only",
+                "network": "full",
+                "extraReadRoots": ["/trusted/read"],
+                "extraWriteRoots": ["/trusted/write"],
+                "scrubEnv": true,
+                "protectVcs": false
+            }
+        }))
+        .unwrap();
+        let sandbox = settings.sandbox.as_ref().unwrap();
+        assert_eq!(sandbox.mode, Some(SandboxMode::ReadOnly));
+        assert_eq!(sandbox.network, Some(SandboxNetworkMode::Full));
+        assert_eq!(
+            sandbox.extra_read_roots,
+            Some(vec!["/trusted/read".to_string()])
+        );
+        assert_eq!(
+            sandbox.extra_write_roots,
+            Some(vec!["/trusted/write".to_string()])
+        );
+        assert_eq!(sandbox.scrub_env, Some(true));
+        assert_eq!(sandbox.protect_vcs, Some(false));
+
+        let serialized = serde_json::to_value(&settings).unwrap();
+        let sandbox = serialized.get("sandbox").unwrap();
+        assert_eq!(
+            sandbox.get("extraReadRoots"),
+            Some(&serde_json::json!(["/trusted/read"]))
+        );
+        assert_eq!(sandbox.get("scrubEnv"), Some(&serde_json::json!(true)));
+        let minimal = Settings {
+            sandbox: Some(SandboxSettings {
+                mode: Some(SandboxMode::Off),
+                ..SandboxSettings::default()
+            }),
+            ..Settings::default()
+        };
+        // The sandbox block serializes only the fields that are set.
+        let minimal_values = serde_json::to_value(&minimal.sandbox).unwrap();
+        let block = minimal_values.as_object().unwrap();
+        assert_eq!(block.len(), 1);
+        assert_eq!(block.get("mode"), Some(&serde_json::json!("off")));
+    }
+
+    #[test]
+    fn sandbox_mode_override_parses_the_documented_values() {
+        assert_eq!(parse_sandbox_mode_override("off"), Some(SandboxMode::Off));
+        assert_eq!(
+            parse_sandbox_mode_override("read-only"),
+            Some(SandboxMode::ReadOnly)
+        );
+        assert_eq!(
+            parse_sandbox_mode_override("workspace-write"),
+            Some(SandboxMode::WorkspaceWrite)
+        );
+        assert_eq!(
+            parse_sandbox_mode_override("danger-full-access"),
+            Some(SandboxMode::DangerFullAccess)
+        );
+        assert_eq!(
+            parse_sandbox_mode_override("  READ-ONLY  "),
+            Some(SandboxMode::ReadOnly)
+        );
+        assert_eq!(parse_sandbox_mode_override("bogus"), None);
+        assert_eq!(parse_sandbox_mode_override(""), None);
+    }
+
+    #[test]
+    fn sandbox_mode_falls_back_to_settings_and_off() {
+        // The env override is ambient-shell territory: when it is set, the test
+        // skips rather than racing the real value against an in-process fixture.
+        if std::env::var_os("PRIME_AGENT_SANDBOX_MODE").is_some() {
+            return;
+        }
+        assert_eq!(Settings::default().sandbox_mode(), SandboxMode::Off);
+        assert_eq!(
+            Settings {
+                sandbox: Some(SandboxSettings {
+                    mode: Some(SandboxMode::ReadOnly),
+                    ..SandboxSettings::default()
+                }),
+                ..Settings::default()
+            }
+            .sandbox_mode(),
+            SandboxMode::ReadOnly
+        );
+    }
 }

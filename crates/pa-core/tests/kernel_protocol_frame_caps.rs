@@ -44,6 +44,9 @@ fn manager(python: std::path::PathBuf) -> ReplKernelManager {
         bootstrap_code: None,
         stderr_log_path: None,
         on_background_work_settled: None,
+
+        sandbox: None,
+        on_sandbox_started: None,
     })
 }
 

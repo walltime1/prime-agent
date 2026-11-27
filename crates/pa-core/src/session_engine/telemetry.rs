@@ -1234,3 +1234,19 @@ fn now_millis() -> u64 {
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default()
 }
+
+/// Build the `sandbox_kernel_started` adoption event for a sandboxed kernel
+/// launch: primitive vocabulary only (mode, backend, network, scrub flag),
+/// never a root or a path.
+#[must_use]
+pub fn sandbox_started_event(
+    backend: pa_types::sandbox::SandboxBackend,
+    policy: &crate::sandbox::SandboxPolicy,
+) -> pa_telemetry::SandboxKernelStarted {
+    pa_telemetry::SandboxKernelStarted {
+        mode: policy.mode().as_str(),
+        backend: backend.as_str(),
+        network: policy.network().as_str(),
+        scrub_env: policy.scrub_env(),
+    }
+}

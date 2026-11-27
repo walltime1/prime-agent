@@ -126,6 +126,28 @@ impl OnboardingStage {
     }
 }
 
+/// `sandbox_kernel_started`: one sandboxed kernel boot. Primitive vocabulary
+/// only: the mode/backend/network slugs and the env-scrub flag; never a path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SandboxKernelStarted {
+    pub mode: &'static str,
+    pub backend: &'static str,
+    pub network: &'static str,
+    pub scrub_env: bool,
+}
+
+impl SandboxKernelStarted {
+    /// Record this sandboxed kernel launch on the telemetry client (fire-and-forget).
+    pub fn track(&self, client: &TelemetryClient) {
+        let mut properties = Properties::new();
+        properties.set("mode", Value::from(self.mode));
+        properties.set("backend", Value::from(self.backend));
+        properties.set("network", Value::from(self.network));
+        properties.set("scrub_env", Value::from(self.scrub_env));
+        client.track("sandbox_kernel_started", properties);
+    }
+}
+
 /// `agent startup stage`: one startup phase's timing.
 #[derive(Debug, Clone)]
 pub struct AgentStartupStage {
@@ -232,7 +254,9 @@ impl UpdateHomebrewRefusal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::{RUN_TRIGGERS, TOOL_CATEGORIES};
+    use crate::catalog::{
+        RUN_TRIGGERS, SANDBOX_BACKENDS, SANDBOX_MODES, SANDBOX_NETWORK_MODES, TOOL_CATEGORIES,
+    };
 
     #[test]
     fn tool_category_mapping() {
@@ -273,5 +297,20 @@ mod tests {
         ] {
             assert!(TOOL_CATEGORIES.contains(&category.as_str()));
         }
+    }
+
+    #[test]
+    fn sandbox_kernel_started_tracks_fire_and_forget_with_catalog_vocabulary() {
+        let event = SandboxKernelStarted {
+            mode: "workspace-write",
+            backend: "seatbelt",
+            network: "none",
+            scrub_env: true,
+        };
+        assert!(SANDBOX_MODES.contains(&event.mode));
+        assert!(SANDBOX_BACKENDS.contains(&event.backend));
+        assert!(SANDBOX_NETWORK_MODES.contains(&event.network));
+        // Inert client proves `track` is synchronous and fire-and-forget.
+        event.track(&TelemetryClient::inert());
     }
 }

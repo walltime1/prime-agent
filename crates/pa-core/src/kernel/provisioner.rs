@@ -124,6 +124,13 @@ pub struct IpythonKernelProvisionerOptions {
     pub session_id: Option<String>,
     pub host_handlers: HostRequestHandlers,
     pub python_skills: Vec<KernelPythonSkill>,
+    /// Announces that a sandboxed kernel is about to run. `None` (or a `None`
+    /// sandbox) emits nothing. Fire-and-forget: never awaited on the boot path.
+    pub on_sandbox_started: Option<crate::kernel::shared::SandboxStartedCallback>,
+    /// The session's OS sandbox. `None` runs the kernel unbounded. The policy
+    /// reaches the kernel manager, which wraps the interpreter at spawn, so
+    /// the kernel and every process it starts share one boundary.
+    pub sandbox: Option<crate::sandbox::SandboxPolicy>,
     /// Artifact directory of a persistent session; the revivable snapshot and
     /// the stderr log live there. `None` for ephemeral sessions.
     pub snapshot_dir: Option<PathBuf>,
@@ -1173,6 +1180,8 @@ async fn start_kernel_impl(
         session_id: options.session_id.clone(),
         host_handlers: options.host_handlers.clone(),
         python_skills: options.python_skills.clone(),
+        sandbox: options.sandbox.clone(),
+        on_sandbox_started: options.on_sandbox_started.clone(),
         on_background_work_settled: options.on_background_work_settled.clone(),
         snapshot,
         bootstrap_code: Some(bootstrap_code.clone()),

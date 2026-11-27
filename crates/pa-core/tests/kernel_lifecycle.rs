@@ -75,6 +75,9 @@ fn test_options(snapshot_dir: Option<&std::path::Path>) -> Option<KernelManagerO
         // The TS provisioner always runs the RLM bootstrap after start; tests match that contract.
         bootstrap_code: Some(build_rlm_bootstrap_code(&[], false)),
         stderr_log_path: None,
+
+        sandbox: None,
+        on_sandbox_started: None,
     })
 }
 

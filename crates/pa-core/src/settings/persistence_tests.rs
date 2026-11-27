@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
+use pa_types::sandbox::{SandboxMode, SandboxNetworkMode};
 use serde_json::{json, Value};
 
-use super::{InMemorySettingsStorage, SettingsManager, SettingsScope, SettingsStorage};
+use super::{
+    InMemorySettingsStorage, SandboxSettings, SettingsManager, SettingsScope, SettingsStorage,
+};
 
 fn fixture(content: &str) -> (Arc<InMemorySettingsStorage>, SettingsManager) {
     let storage = Arc::new(InMemorySettingsStorage::default());
@@ -340,4 +343,38 @@ fn project_percentage_overrides_global_and_stale_writes_preserve_external_settin
     first.set_compaction_threshold_percent(90.0).unwrap();
     first.reload().unwrap();
     assert_eq!(first.get_compaction_threshold_percent(), 60.5);
+}
+
+#[test]
+fn project_settings_cannot_select_a_sandbox_configuration() {
+    let (storage, mut manager) = fixture(
+        r#"{"sandbox":{"mode":"workspace-write","network":"full","extraReadRoots":["/trusted/read"],"scrubEnv":true,"protectVcs":true}}"#,
+    );
+    let project = json!({
+        "sandbox": {"mode": "danger-full-access", "network": "full"}
+    });
+    storage
+        .with_lock(SettingsScope::Project, &mut |_| Some(project.to_string()))
+        .unwrap();
+    manager.reload().unwrap();
+    let reopened = manager.reopen();
+    let expected = Some(SandboxSettings {
+        mode: Some(SandboxMode::WorkspaceWrite),
+        network: Some(SandboxNetworkMode::Full),
+        extra_read_roots: Some(vec!["/trusted/read".to_string()]),
+        extra_write_roots: None,
+        scrub_env: Some(true),
+        protect_vcs: Some(true),
+    });
+    for effective in [manager.settings(), reopened.settings()] {
+        assert_eq!(
+            effective.sandbox, expected,
+            "the global sandbox survives; the project block is stripped"
+        );
+    }
+    assert_eq!(manager.project_settings().sandbox, None);
+    let project_doc =
+        serde_json::from_str::<Value>(&storage.read(SettingsScope::Project).unwrap().unwrap())
+            .unwrap();
+    assert_eq!(project_doc, project);
 }

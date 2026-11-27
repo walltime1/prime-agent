@@ -303,6 +303,11 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
     // default cell time limit (default 60s, `0` disables).
     let python_cell_timeout_ms = settings.get_python_cell_timeout_ms();
     let web_search_provider = settings.get_web_search_provider();
+    // The sandbox inputs that must survive `settings` moving into the
+    // resource loader below.
+    let sandbox_settings = settings.settings().sandbox.clone();
+    let sandbox_mode = settings.settings().sandbox_mode();
+
     let (mcp_skill_overrides, mcp_generic_servers, built_manager) =
         mcp_gating(&settings, config.agent_dir.clone()).await?;
     let mcp_manager = config
@@ -535,6 +540,21 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
     let model_visible_skills =
         super::runtime_wiring::model_visible_skills(resources.skills.clone(), &handlers);
     let python_skills = super::runtime_wiring::kernel_python_skills(&model_visible_skills);
+    let global_harness_dir = crate::refinement::get_global_harness_state_dir(&config.agent_dir);
+    let workspace_harness_dir = workspace.is_some().then(|| harness_write_dir.clone());
+    // A requested boundary that cannot be built fails session creation,
+    // never runs the kernel unbounded.
+    let sandbox = super::runtime_wiring::resolve_sandbox(
+        sandbox_mode,
+        sandbox_settings.as_ref(),
+        &cwd,
+        kernel_shell_path.as_ref(),
+        &python_skills,
+        session_artifact_dir.as_deref(),
+        &global_harness_dir,
+        workspace_harness_dir.as_deref(),
+    )?;
+
     // `rlm.skills.*` resolves the passive cluster index in the prompt inventory; a JIT read
     // counts as a skill use (`skill_use_count`) when the session reports telemetry.
     let on_skill_read: super::skills_host::SkillReadHook = if config.telemetry.is_some() {
@@ -575,14 +595,16 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
         session_id.clone(),
         handlers,
         python_skills.clone(),
+        sandbox,
+        sandbox_started_callback(config.telemetry.as_ref()),
         cwd.clone(),
         &config.agent_dir,
         kernel_shell_path,
         kernel_command_prefix,
         websearch_env,
         session_artifact_dir,
-        crate::refinement::get_global_harness_state_dir(&config.agent_dir),
-        workspace.is_some().then(|| harness_write_dir.clone()),
+        global_harness_dir,
+        workspace_harness_dir,
         cell_timeout_ms,
         on_restore,
         config.on_background_work_settled.clone(),
@@ -1245,3 +1267,18 @@ mod append_system_tests;
 
 #[cfg(test)]
 mod billed_row_tests;
+
+/// The sandbox-started telemetry seam: absent when telemetry is opted out,
+/// otherwise a callback that emits one primitive-property event per sandboxed
+/// kernel start. Synchronous, so the kernel boot path never waits on a sink.
+fn sandbox_started_callback(
+    wiring: Option<&crate::session_engine::telemetry::TelemetryWiring>,
+) -> Option<crate::kernel::shared::SandboxStartedCallback> {
+    let client = wiring?.client.clone();
+    Some(std::sync::Arc::new(
+        move |backend, policy: &crate::sandbox::SandboxPolicy| {
+            let event = crate::session_engine::telemetry::sandbox_started_event(backend, policy);
+            event.track(&client);
+        },
+    ))
+}

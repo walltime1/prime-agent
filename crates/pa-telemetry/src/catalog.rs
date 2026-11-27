@@ -1253,12 +1253,42 @@ const WEB_SEARCH_PROVIDER_CHANGED: EventRule = EventRule {
     )],
 };
 
+pub(crate) const SANDBOX_MODES: &[&str] = &[
+    "off",
+    "read-only",
+    "workspace-write",
+    "danger-full-access",
+    "unknown",
+];
+
+pub(crate) const SANDBOX_BACKENDS: &[&str] = &["none", "seatbelt", "bubblewrap", "unknown"];
+
+pub(crate) const SANDBOX_NETWORK_MODES: &[&str] = &["none", "full", "unknown"];
+
+/// `sandbox_kernel_started`: the kernel sandbox boundary booted. Primitives only:
+/// the effective mode/backend/network vocabulary slugs and the env-scrub flag;
+/// never extra roots, paths, or any content.
+const SANDBOX_KERNEL_STARTED: EventRule = EventRule {
+    name: "sandbox_kernel_started",
+    since: 2,
+    properties: &[
+        ("mode", required(enum_rule(SANDBOX_MODES, "unknown"))),
+        ("backend", required(enum_rule(SANDBOX_BACKENDS, "unknown"))),
+        (
+            "network",
+            required(enum_rule(SANDBOX_NETWORK_MODES, "unknown")),
+        ),
+        ("scrub_env", required(boolean())),
+    ],
+};
+
 /// Every catalogued event, flattened.
 #[must_use]
 pub fn catalog() -> Vec<&'static EventRule> {
     let mut all: Vec<&'static EventRule> = vec![
         &HARNESS_REFINEMENTS_CHANGED,
         &WEB_SEARCH_PROVIDER_CHANGED,
+        &SANDBOX_KERNEL_STARTED,
         &AGENT_STARTED,
         &AGENT_RUN_COMPLETED,
         &AGENT_SESSION_ENDED,
@@ -1560,5 +1590,45 @@ mod tests {
         properties.set("execution_mode", json!("interactive"));
         let _ = sanitize("startup", &mut properties);
         assert!(properties.get("phase_timings").is_some());
+    }
+
+    #[test]
+    fn sandbox_kernel_started_is_catalogued_primitives_only() {
+        let rule = lookup("sandbox_kernel_started").expect("catalogued");
+        let names: Vec<&str> = rule.properties.iter().map(|(key, _)| *key).collect();
+        assert_eq!(names, vec!["mode", "backend", "network", "scrub_env"]);
+
+        let mut properties = Properties::new();
+        properties.set("mode", json!("read-only"));
+        properties.set("backend", json!("seatbelt"));
+        properties.set("network", json!("full"));
+        properties.set("scrub_env", json!(true));
+        properties.set("path", json!("/secret/outside")); // not catalogued: dropped
+        properties.set("extra_roots", json!("/tmp/extra")); // not catalogued: dropped
+        let adjusted = sanitize("sandbox_kernel_started", &mut properties);
+        assert_eq!(properties.get("mode"), Some(&json!("read-only")));
+        assert_eq!(properties.get("backend"), Some(&json!("seatbelt")));
+        assert_eq!(properties.get("network"), Some(&json!("full")));
+        assert_eq!(properties.get("scrub_env"), Some(&json!(true)));
+        assert!(properties.get("path").is_none(), "path key dropped");
+        assert!(
+            properties.get("extra_roots").is_none(),
+            "extra_roots key dropped"
+        );
+        assert_eq!(adjusted, 2);
+    }
+
+    #[test]
+    fn sandbox_kernel_started_normalizes_out_of_vocabulary_values() {
+        let mut properties = Properties::new();
+        properties.set("mode", json!("bogus"));
+        properties.set("backend", json!("bpf"));
+        properties.set("network", json!("yes"));
+        properties.set("scrub_env", json!("true"));
+        sanitize("sandbox_kernel_started", &mut properties);
+        assert_eq!(properties.get("mode"), Some(&json!("unknown")));
+        assert_eq!(properties.get("backend"), Some(&json!("unknown")));
+        assert_eq!(properties.get("network"), Some(&json!("unknown")));
+        assert_eq!(properties.get("scrub_env"), None, "non-boolean dropped");
     }
 }

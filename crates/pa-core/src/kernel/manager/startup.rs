@@ -203,12 +203,42 @@ impl Inner {
         }
 
         let cwd = self.options.cwd.clone();
-        let env = kernel_spawn_env(&self.options.env);
-        let mut command = tokio::process::Command::new(&python);
-        command
+        let mut env = kernel_spawn_env(&self.options.env);
+        let sandboxed = match &self.options.sandbox {
+            Some(policy) => {
+                if policy.scrub_env() {
+                    crate::sandbox::scrub_secrets(&mut env);
+                }
+                if let Some(on_started) = &self.options.on_sandbox_started {
+                    on_started(crate::sandbox::backend(), policy);
+                }
+                let args: Vec<String> = KERNEL_ARGS.iter().map(|arg| (*arg).to_string()).collect();
+                let scratch = policy.scratch_dir();
+                if policy.mode() == pa_types::sandbox::SandboxMode::WorkspaceWrite {
+                    let _ = std::fs::create_dir_all(&scratch);
+                    let scratch_str = scratch.as_os_str().to_os_string();
+                    for var in ["TMPDIR", "TEMP", "TMP"] {
+                        env.insert(std::ffi::OsString::from(var), scratch_str.clone());
+                    }
+                }
+                Some(crate::sandbox::wrap_kernel(
+                    policy, &python, &args, &scratch,
+                )?)
+            }
+            None => None,
+        };
+        let mut command = if let Some(wrapped) = &sandboxed {
+            let mut command = tokio::process::Command::new(&wrapped.program);
+            command.args(&wrapped.args);
+            command
+        } else {
+            let mut command = tokio::process::Command::new(&python);
             // `-m` otherwise prepends the project cwd to sys.path, allowing
             // a repository's `rlm` to run before a prompt.
-            .args(["-P", "-s", "-m", "rlm.repl"])
+            command.args(KERNEL_ARGS);
+            command
+        };
+        command
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -590,6 +620,9 @@ impl Inner {
 /// read UTF-8 regardless of the active legacy code page, overriding any
 /// provisioner-provided `PYTHONUTF8`) and the owner pid the runtime journals
 /// its process groups under.
+/// The kernel interpreter's own arguments; a sandbox wraps the whole command.
+const KERNEL_ARGS: [&str; 4] = ["-P", "-s", "-m", "rlm.repl"];
+
 fn kernel_spawn_env(
     options_env: &HashMap<String, String>,
 ) -> HashMap<std::ffi::OsString, std::ffi::OsString> {

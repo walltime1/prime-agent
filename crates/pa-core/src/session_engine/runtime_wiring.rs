@@ -249,6 +249,8 @@ pub fn kernel_provisioner(
     session_id: String,
     handlers: HostRequestHandlers,
     python_skills: Vec<KernelPythonSkill>,
+    sandbox: Option<crate::sandbox::SandboxPolicy>,
+    on_sandbox_started: Option<crate::kernel::shared::SandboxStartedCallback>,
     cwd: std::path::PathBuf,
     agent_dir: &std::path::Path,
     shell_path: Option<std::path::PathBuf>,
@@ -302,6 +304,8 @@ pub fn kernel_provisioner(
             session_id: Some(session_id),
             host_handlers: handlers,
             python_skills,
+            sandbox,
+            on_sandbox_started,
             // Only persistent sessions (which have an artifact dir) get
             // a revivable snapshot (TS `snapshotDir`).
             snapshot_dir: session_artifact_dir,
@@ -494,6 +498,69 @@ pub fn ipython_tool_options(
         provisioner,
         on_late_sent_agent_message,
     }
+}
+
+/// Resolve the session's OS sandbox from settings and the session facts.
+///
+/// The home directory is the real one ([`pa_types::platform::home_dir`]),
+/// never `agent_dir`: `agent_dir` may be session-scoped, while `~` expansion
+/// must follow the user's account. The interpreter is only needed for its
+/// directory (the readable system root it lives under), so the kernel venv
+/// path stands in when the exact interpreter is not resolved yet.
+///
+/// # Errors
+///
+/// Error when the mode asks for a boundary the platform cannot build, or when
+/// the workspace is not absolute; session creation fails rather than running
+/// unbounded.
+#[allow(clippy::too_many_arguments)] // session sandbox resolution inputs
+pub fn resolve_sandbox(
+    mode: pa_types::sandbox::SandboxMode,
+    block: Option<&crate::settings::types::SandboxSettings>,
+    cwd: &std::path::Path,
+    shell_path: Option<&std::path::PathBuf>,
+    python_skills: &[KernelPythonSkill],
+    snapshot_dir: Option<&std::path::Path>,
+    global_harness_dir: &std::path::Path,
+    workspace_harness_dir: Option<&std::path::Path>,
+) -> anyhow::Result<Option<crate::sandbox::SandboxPolicy>> {
+    if matches!(
+        mode,
+        pa_types::sandbox::SandboxMode::Off | pa_types::sandbox::SandboxMode::DangerFullAccess
+    ) {
+        return Ok(None);
+    }
+    let home = pa_types::platform::home_dir()
+        .ok_or_else(|| anyhow::anyhow!("sandbox.mode needs a home directory to resolve roots"))?;
+    let venv = crate::kernel::bootstrap::kernel_venv_dir();
+    let python = venv.join("bin").join("python3");
+    let block = block.cloned().unwrap_or_default();
+    let orphan_journal =
+        std::env::var_os(crate::kernel::orphan_journal::ORPHAN_PROCESS_JOURNAL_ENV)
+            .filter(|value| !value.is_empty())
+            .map(std::path::PathBuf::from);
+    let inputs = crate::sandbox::SandboxInputs {
+        mode,
+        network: block
+            .network
+            .unwrap_or(pa_types::sandbox::SandboxNetworkMode::None),
+        settings: Some(block),
+        cwd: cwd.to_path_buf(),
+        home,
+        python,
+        venv: Some(venv),
+        python_skills: python_skills
+            .iter()
+            .map(|skill| skill.package_path.clone())
+            .collect(),
+        shell_path: shell_path.cloned(),
+        global_harness_dir: Some(global_harness_dir.to_path_buf()),
+        workspace_harness_dir: workspace_harness_dir.map(std::path::Path::to_path_buf),
+        snapshot_dir: snapshot_dir.map(std::path::Path::to_path_buf),
+        orphan_journal,
+    };
+    let resolved = crate::sandbox::resolve(&inputs)?;
+    Ok(resolved)
 }
 
 #[cfg(test)]
