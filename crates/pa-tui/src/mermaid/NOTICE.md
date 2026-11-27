@@ -9,5 +9,8 @@ Local modifications: the upstream test module moved to `tests.rs`; Rust 2024 `le
 rewritten as nested `if let` for this edition-2021 workspace; the unused `MermaidArt::plain_lines`
 output was removed (the tests derive the same text from `styled_lines`); the flowchart parser keeps
 hyphens inside node ids and quoted edge labels, and sequence diagrams keep a `;` that follows a
-message's or note's `:`; and the code was conformed to this workspace's rustfmt and clippy
-configuration.
+message's or note's `:`; `flowchart BT` keeps multi-line labels in reading order; state-diagram
+composite states (`state X { ... }`) are drawn as frames with their own `[*]`; edge labels get
+room to draw in full; top-down edges that skip a rank or point back are drawn as matched connector
+tags (`├(a)` … `(a)▶`) instead of a long run to a lane at the canvas edge; and the code was
+conformed to this workspace's rustfmt and clippy configuration.

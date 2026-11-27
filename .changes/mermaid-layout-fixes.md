@@ -1,0 +1,1 @@
+- Mermaid diagrams in the chat are easier to read: edges that skip a level or loop back are drawn as matching tags like (a) beside their two boxes instead of long lines that looked like connections to other boxes, composite states are drawn as frames, edge labels are no longer cut off, and bottom-to-top flowcharts keep multi-line labels in reading order.

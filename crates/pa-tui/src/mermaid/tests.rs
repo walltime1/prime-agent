@@ -675,13 +675,27 @@ fn comment_outside_quotes_is_stripped() {
     assert_eq!(g.edges.len(), 1);
 }
 
+/// An edge that skips a rank is a tag pair, so no line passes the box in between.
 #[test]
-fn skip_edge_routes_around_intermediate_boxes() {
-    let out = plain("graph TD\n A --> B\n B --> C\n A --> C");
-    assert!(!out.contains('┼'), "no border corruption:\n{out}");
-    assert!(
-        out.contains('◄'),
-        "skip edge enters target from lane:\n{out}"
+fn skip_edge_is_a_tag_pair_not_a_line_past_boxes() {
+    assert_eq!(
+        plain("graph TD\n A --> B\n B --> C\n A --> C"),
+        [
+            "     ┌───┐",
+            "     │ A ├(a)",
+            "     └─┬─┘",
+            "       │",
+            "       ▼",
+            "     ┌───┐",
+            "     │ B │",
+            "     └─┬─┘",
+            "       │",
+            "       ▼",
+            "     ┌───┐",
+            " (a)▶│ C │",
+            "     └───┘",
+        ]
+        .join("\n")
     );
 }
 
@@ -798,33 +812,51 @@ fn fan_out_keeps_single_bus_row() {
     assert!(!out.contains('┼'), "{out}");
 }
 
+/// Tagged edges into one box share a single arrow head.
 #[test]
-fn shared_target_back_edges_share_one_lane() {
-    let two = plain("graph TD\n A --> B\n B --> C\n B --> A\n C --> A");
-    let one = plain("graph TD\n A --> B\n B --> C\n C --> A");
+fn shared_target_tags_share_one_arrow() {
     assert_eq!(
-        two.lines().map(unicode_width::UnicodeWidthStr::width).max(),
-        one.lines().map(unicode_width::UnicodeWidthStr::width).max(),
-        "shared-target back edges merge into one lane:\n{two}"
+        plain("graph TD\n A --> B\n B --> C\n B --> A\n C --> A"),
+        [
+            "        ┌───┐",
+            " (a)(b)▶│ A │",
+            "        └─┬─┘",
+            "          │",
+            "          ▼",
+            "        ┌───┐",
+            "        │ B ├(a)",
+            "        └─┬─┘",
+            "          │",
+            "          ▼",
+            "        ┌───┐",
+            "        │ C ├(b)",
+            "        └───┘",
+        ]
+        .join("\n")
     );
-    assert_eq!(two.matches('◄').count(), 1, "{two}");
 }
 
+/// Back edges are a matched tag pair beside their two boxes, not a run to a lane.
 #[test]
-fn distinct_back_edges_get_separate_lanes() {
-    let split = plain("graph TD\n A --> B\n B --> C\n B --> A\n C --> B");
-    let single = plain("graph TD\n A --> B\n B --> C\n C --> B");
-    assert_eq!(split.matches('◄').count(), 2, "{split}");
-    assert!(
-        split
-            .lines()
-            .map(unicode_width::UnicodeWidthStr::width)
-            .max()
-            > single
-                .lines()
-                .map(unicode_width::UnicodeWidthStr::width)
-                .max(),
-        "overlapping unrelated back edges claim a second lane:\n{split}"
+fn back_edges_become_tag_pairs() {
+    assert_eq!(
+        plain("graph TD\n A --> B\n B --> C\n B --> A\n C --> B"),
+        [
+            "     ┌───┐",
+            " (a)▶│ A │",
+            "     └─┬─┘",
+            "       │",
+            "       ▼",
+            "     ┌───┐",
+            " (b)▶│ B ├(a)",
+            "     └─┬─┘",
+            "       │",
+            "       ▼",
+            "     ┌───┐",
+            "     │ C ├(b)",
+            "     └───┘",
+        ]
+        .join("\n")
     );
 }
 
@@ -1378,11 +1410,28 @@ fn state_notes_are_skipped() {
     assert!(!out.contains("block text"), "{out}");
 }
 
+/// A back transition's label is drawn inside its target tag.
 #[test]
-fn state_back_transition_uses_lane() {
-    let out = plain("stateDiagram-v2\n A --> B\n B --> C\n C --> B: retry");
-    assert!(out.contains('◄'), "{out}");
-    assert!(out.contains("retry"), "{out}");
+fn state_back_transition_label_rides_in_the_tag() {
+    assert_eq!(
+        plain("stateDiagram-v2\n A --> B\n B --> C\n C --> B: retry"),
+        [
+            "            ╭───╮",
+            "            │ A │",
+            "            ╰─┬─╯",
+            "              │",
+            "              ▼",
+            "            ╭───╮",
+            " (a: retry)▶│ B │",
+            "            ╰─┬─╯",
+            "              │",
+            "              ▼",
+            "            ╭───╮",
+            "            │ C ├(a)",
+            "            ╰───╯",
+        ]
+        .join("\n")
+    );
 }
 
 #[test]
@@ -1799,4 +1848,183 @@ fn flowchart_semicolons_still_split_statements() {
             ("B".to_string(), "C".to_string(), None),
         ]
     );
+}
+
+#[test]
+fn bt_multiline_label_keeps_line_order() {
+    let art = render(
+        "flowchart BT\n  a[\"alpha beta gamma delta epsilon zeta eta\"] --> b[target]",
+        &styles(),
+        Some(120),
+    )
+    .unwrap();
+    let lines = plain_lines(&art);
+    let row_of = |word: &str| {
+        lines
+            .iter()
+            .position(|l| l.contains(word))
+            .unwrap_or_else(|| panic!("no row contains {word:?}:\n{}", lines.join("\n")))
+    };
+    assert!(row_of("alpha") < row_of("epsilon"), "{}", lines.join("\n"));
+}
+
+const STATE_DEEPSEEK: &str = r"stateDiagram-v2
+    [*] --> idle
+    idle --> streaming : prompt admitted
+    streaming --> idle : final answer (TurnEnd)
+    streaming --> toolRunning : ToolCall emitted
+    state toolRunning {
+        [*] --> executing
+        executing --> stalled : heartbeat with no progress
+        stalled --> executing : ToolExecutionProgress
+        executing --> [*] : ToolExecutionEnd
+    }
+    toolRunning --> streaming : tool result sent to provider
+    streaming --> compacting : context over budget
+    toolRunning --> compacting : context over budget
+    compacting --> idle : summary written
+    compacting --> aborted : user cancels
+    streaming --> aborted : user interrupts
+    aborted --> idle : cleanup
+    idle --> ended : delete or daemon shutdown
+    ended --> [*]
+";
+
+const STATE_INKLING: &str = r"stateDiagram-v2
+    [*] --> idle
+    idle --> compacting: context full
+    compacting --> idle: compacted
+    idle --> session-active: user prompt
+    state session-active {
+        [*] --> streaming
+        streaming --> tool-running: tool call
+        tool-running --> streaming: tool result
+    }
+    session-active --> compacting: context full
+    session-active --> ended: agent end / abort
+    idle --> ended: cancel
+    ended --> [*]
+";
+
+#[test]
+fn composite_state_becomes_a_group() {
+    let graph = parse_state(STATE_DEEPSEEK).unwrap();
+    assert_eq!(
+        graph.groups.len(),
+        1,
+        "{:?}",
+        graph.groups.iter().map(|g| &g.id).collect::<Vec<_>>()
+    );
+    let group = graph
+        .groups
+        .iter()
+        .position(|g| g.id == "toolRunning")
+        .unwrap();
+    let node_in = |label: &str| {
+        let i = graph
+            .nodes
+            .iter()
+            .position(|n| n.label == label)
+            .unwrap_or_else(|| panic!("missing node {label:?}"));
+        graph.node_group.get(i).copied().flatten()
+    };
+    assert_eq!(node_in("executing"), Some(group));
+    assert_eq!(node_in("stalled"), Some(group));
+    let dots: Vec<Option<usize>> = graph
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.label == "●")
+        .map(|(i, _)| graph.node_group.get(i).copied().flatten())
+        .collect();
+    assert_eq!(dots.len(), 4, "{dots:?}");
+    assert_eq!(
+        dots.iter().filter(|g| **g == Some(group)).count(),
+        2,
+        "{dots:?}"
+    );
+}
+
+#[test]
+fn composite_state_draws_a_frame() {
+    let art = render(STATE_DEEPSEEK, &styles(), Some(140)).unwrap();
+    let lines = plain_lines(&art);
+    // The composite state is a titled frame (`┌ toolRunning ───┐`), not a plain box.
+    assert!(
+        lines.iter().any(|l| l.contains("┌ toolRunning ─")),
+        "{}",
+        lines.join("\n")
+    );
+}
+
+/// Every connector tag name appears exactly twice in the whole diagram (beside its source and
+/// its target), even when edges sit in different composite-state frames.
+#[test]
+fn tag_names_are_unique_across_frames() {
+    let text = plain_lines(&render(STATE_INKLING, &styles(), Some(140)).unwrap()).join("\n");
+    let mut counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for (start, _) in text.match_indices('(') {
+        let name: String = text[start + 1..]
+            .chars()
+            .take_while(char::is_ascii_lowercase)
+            .collect();
+        let closes = text[start + 1 + name.len()..].starts_with([')', ':']);
+        if !name.is_empty() && closes {
+            *counts.entry(name).or_default() += 1;
+        }
+    }
+    assert_eq!(
+        counts,
+        [("a", 2), ("b", 2), ("c", 2), ("d", 2)]
+            .into_iter()
+            .map(|(name, n)| (name.to_string(), n))
+            .collect(),
+        "{text}"
+    );
+}
+
+#[test]
+fn state_labels_are_drawn_in_full_deepseek() {
+    let art = render(STATE_DEEPSEEK, &styles(), Some(140)).unwrap();
+    let text = plain_lines(&art).join("\n");
+    let expected = [
+        "prompt admitted",
+        "final answer (TurnEnd)",
+        "ToolCall emitted",
+        "heartbeat with no progress",
+        "ToolExecutionProgress",
+        "ToolExecutionEnd",
+        "tool result sent to provider",
+        "context over budget",
+        "summary written",
+        "user cancels",
+        "user interrupts",
+        "cleanup",
+        "delete or daemon shutdown",
+    ];
+    let missing: Vec<&str> = expected
+        .into_iter()
+        .filter(|label| !text.contains(label))
+        .collect();
+    assert_eq!(missing, Vec::<&str>::new(), "{text}");
+}
+
+#[test]
+fn state_labels_are_drawn_in_full_inkling() {
+    let art = render(STATE_INKLING, &styles(), Some(140)).unwrap();
+    let text = plain_lines(&art).join("\n");
+    let expected = [
+        "context full",
+        "compacted",
+        "user prompt",
+        "tool call",
+        "tool result",
+        "agent end / abort",
+        "cancel",
+    ];
+    let missing: Vec<&str> = expected
+        .into_iter()
+        .filter(|label| !text.contains(label))
+        .collect();
+    assert_eq!(missing, Vec::<&str>::new(), "{text}");
 }
