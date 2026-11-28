@@ -927,6 +927,27 @@ pub enum DaemonCommand {
         #[serde(flatten)]
         rest: JsonMap,
     },
+    SetSandboxMode {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active_session_id: Option<String>,
+        mode: crate::sandbox::SandboxMode,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        network: Option<crate::sandbox::SandboxNetworkMode>,
+        #[serde(flatten)]
+        rest: JsonMap,
+    },
+    ResolveToolApproval {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active_session_id: Option<String>,
+        request_id: String,
+        decision: crate::sandbox::ToolApprovalDecision,
+        #[serde(flatten)]
+        rest: JsonMap,
+    },
     SetServiceTier {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<String>,

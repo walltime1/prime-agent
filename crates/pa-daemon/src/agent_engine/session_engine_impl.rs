@@ -868,6 +868,7 @@ impl SessionEngine for AgentSessionEngine {
         // This session's own depth gates the kernel `refine.*` host requests (depth-0 only).
         self.rlm_depth
             .store(identity.rlm_depth, std::sync::atomic::Ordering::Relaxed);
+        self.sync_approval_emitter();
         self.factory_child
             .store(identity.factory_child, std::sync::atomic::Ordering::Relaxed);
         if let Some(thinking) = &identity.thinking {
@@ -1542,6 +1543,58 @@ impl SessionEngine for AgentSessionEngine {
                 agent.set_follow_up_mode(mode);
             }
         }
+    }
+
+    fn sandbox_state(&self) -> crate::engine::SandboxState {
+        self.approval_gate.state()
+    }
+
+    fn set_sandbox_mode(
+        &self,
+        mode: pa_types::sandbox::SandboxMode,
+        network: Option<pa_types::sandbox::SandboxNetworkMode>,
+    ) -> crate::engine::SandboxModeFuture<'_> {
+        Box::pin(async move { self.apply_sandbox_mode(mode, network, "unknown").await })
+    }
+
+    fn resolve_tool_approval(
+        &self,
+        request_id: &str,
+        decision: pa_types::sandbox::ToolApprovalDecision,
+    ) -> bool {
+        let decision_slug = match &decision {
+            pa_types::sandbox::ToolApprovalDecision::AllowOnce => "allow-once",
+            pa_types::sandbox::ToolApprovalDecision::AllowSessionEdits => "allow-session-edits",
+            pa_types::sandbox::ToolApprovalDecision::AllowSessionPrefix { .. } => {
+                "allow-session-prefix"
+            }
+            pa_types::sandbox::ToolApprovalDecision::SwitchToYolo => "switch-to-yolo",
+            pa_types::sandbox::ToolApprovalDecision::Deny { .. } => "deny",
+        };
+        let resolved = self.approval_gate.resolve(request_id, decision);
+        let meta = self
+            .pending_approval_meta
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(request_id);
+        if resolved && self.config.telemetry_disabled != Some(true) {
+            if let Some((kind, risky)) = meta {
+                let cwd = self.cwd();
+                let agent_dir = self.config.agent_dir.clone();
+                self.runtime.spawn_blocking(move || {
+                    let settings = pa_core::settings::SettingsManager::create(&cwd, &agent_dir);
+                    let client =
+                        pa_core::session_engine::telemetry::build_client(&settings, &agent_dir);
+                    pa_telemetry::ToolApprovalResolved {
+                        kind: kind.as_str(),
+                        decision: decision_slug,
+                        risky,
+                    }
+                    .track(&client);
+                });
+            }
+        }
+        resolved
     }
 }
 

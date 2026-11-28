@@ -317,6 +317,10 @@ pub const APP_KEYBINDINGS: &[(&str, KeybindingDefinition)] = &[
         "app.tools.expand",
         def!(&["ctrl+o"], "Cycle conversation detail", scope "editor"),
     ),
+    (
+        "app.sandbox.cycleMode",
+        def!(&["shift+tab"], "Cycle sandbox mode"),
+    ),
     ("app.subagents.focus", def!(&["alt+a"], "Focus activity")),
     (
         "app.editor.external",

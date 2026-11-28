@@ -5,11 +5,13 @@
 
 use std::fmt::Write as _;
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use serde_json::json;
 
+use crate::sandbox::approval::{ApprovalOutcome, SessionApprovalGate};
 use crate::settings::types::DEFAULT_PYTHON_CELL_TIMEOUT_MS;
 
 mod diff;
@@ -261,10 +263,20 @@ async fn execute_cell(
     Ok((result, kernel_restarted))
 }
 
+/// Callback invoked when the user chooses `SwitchToYolo` on a tool approval prompt.
+pub type OnSwitchToYolo = Arc<dyn Fn() + Send + Sync>;
+
 pub struct IpythonToolOptions {
     /// Shared provisioner owning the kernel lifecycle.
     pub provisioner: Arc<dyn IpythonKernelProvisioner>,
     pub on_late_sent_agent_message: Option<LateSentAgentMessageHandler>,
+    /// Optional per-session interactive approval gate (`None` runs without prompting).
+    pub approval_gate: Option<Arc<SessionApprovalGate>>,
+    /// Session working directory used for classifying `bash()` path arguments.
+    pub cwd: PathBuf,
+    /// Optional callback invoked when the user switches to yolo (`DangerFullAccess`)
+    /// from an interactive approval prompt.
+    pub on_switch_to_yolo: Option<OnSwitchToYolo>,
 }
 
 pub fn ipython_tool_schema() -> serde_json::Value {
@@ -315,6 +327,33 @@ pub async fn execute_ipython(
     on_update: Option<OnUpdate>,
     on_late_sent_agent_message: Option<crate::kernel::shared::LateSentAgentMessageCallback>,
 ) -> anyhow::Result<ToolExecutionResult> {
+    if let Some(gate) = &options.approval_gate {
+        match gate
+            .check_and_request(code, &options.cwd, signal.clone())
+            .await
+        {
+            ApprovalOutcome::Allowed => {}
+            ApprovalOutcome::AllowedAndSwitchToYolo => {
+                if let Some(on_switch) = &options.on_switch_to_yolo {
+                    on_switch();
+                }
+            }
+            ApprovalOutcome::Denied(reason) => {
+                return Ok(ToolExecutionResult {
+                    content: vec![ToolContentBlock::text(format!(
+                        "Tool execution denied: {reason}"
+                    ))],
+                    details: Some(json!({
+                        "status": "denied",
+                        "reason": reason,
+                    })),
+                    is_error: true,
+                    terminate: None,
+                });
+            }
+        }
+    }
+
     let report_startup_progress: BootstrapProgressHandler = {
         let on_update = on_update.clone();
         Arc::new(move |message: &str| {

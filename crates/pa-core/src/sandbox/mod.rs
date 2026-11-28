@@ -7,6 +7,7 @@
 //! reads and writes outside the policy's roots fail, and network is denied
 //! unless the session asks for it.
 
+pub mod approval;
 mod env;
 #[cfg(target_os = "linux")]
 mod linux_bwrap;

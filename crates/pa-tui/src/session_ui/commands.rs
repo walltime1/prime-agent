@@ -1175,6 +1175,12 @@ impl SessionUi {
                 if let Some(mode) = data.get("steeringMode").and_then(Value::as_str) {
                     self.steering_mode = mode.to_string();
                 }
+                if let Some(mode) = data.get("sandboxMode").and_then(|value| {
+                    serde_json::from_value::<pa_types::sandbox::SandboxMode>(value.clone()).ok()
+                }) {
+                    self.sandbox_mode = Some(mode);
+                    view.chrome.sandbox_mode = Some(mode);
+                }
                 Some(data)
             }
             Err(error) => {

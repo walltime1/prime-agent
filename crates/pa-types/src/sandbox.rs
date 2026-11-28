@@ -40,6 +40,28 @@ impl SandboxMode {
             Self::DangerFullAccess => "danger-full-access",
         }
     }
+
+    /// Cycle through the interactive modes (`workspace-write` -> `read-only` ->
+    /// `danger-full-access` -> `workspace-write`). `Off` enters at `WorkspaceWrite`.
+    #[must_use]
+    pub const fn cycle_next(self) -> Self {
+        match self {
+            Self::Off | Self::DangerFullAccess => Self::WorkspaceWrite,
+            Self::WorkspaceWrite => Self::ReadOnly,
+            Self::ReadOnly => Self::DangerFullAccess,
+        }
+    }
+
+    /// Short human-readable label for the TUI tray.
+    #[must_use]
+    pub const fn short_label(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::ReadOnly => "read-only",
+            Self::WorkspaceWrite => "workspace",
+            Self::DangerFullAccess => "yolo",
+        }
+    }
 }
 
 /// The network posture allowed inside the sandbox (`none` by default).
@@ -136,6 +158,63 @@ pub struct SandboxViolationEvent {
     pub path: Option<String>,
     /// A short, non-content denial detail.
     pub detail: String,
+}
+
+/// What kind of action triggered a tool approval prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ToolApprovalKind {
+    /// File edit or write inside Python (`edit()`, `write_text()`, `open(..., 'w')`).
+    FileEdit,
+    /// Non-read-only `bash()` command.
+    BashCommand,
+    /// `bash()` command matching a risky/destructive pattern or outside-cwd path.
+    RiskyBashCommand,
+    /// Unclassified or bypass-capable Python (`subprocess`, `os.remove`, dynamic `bash(var)`, etc.).
+    OpaquePython,
+}
+
+impl ToolApprovalKind {
+    /// The canonical kebab-case wire/telemetry slug.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::FileEdit => "file-edit",
+            Self::BashCommand => "bash-command",
+            Self::RiskyBashCommand => "risky-bash-command",
+            Self::OpaquePython => "opaque-python",
+        }
+    }
+}
+
+/// Interactive approval request emitted to the TUI before running a `python_repl` cell.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolApprovalRequest {
+    pub request_id: String,
+    pub kind: ToolApprovalKind,
+    pub summary: String,
+    pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_prefix: Option<String>,
+}
+
+/// The user's response to a [`ToolApprovalRequest`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "kebab-case")]
+pub enum ToolApprovalDecision {
+    AllowOnce,
+    AllowSessionEdits,
+    AllowSessionPrefix {
+        prefix: String,
+    },
+    SwitchToYolo,
+    Deny {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
 }
 
 #[cfg(test)]

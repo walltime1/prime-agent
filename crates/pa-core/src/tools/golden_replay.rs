@@ -176,6 +176,9 @@ async fn golden_ipython_group_matches_ts() {
         let options = IpythonToolOptions {
             provisioner: provisioner.clone(),
             on_late_sent_agent_message: None,
+            approval_gate: None,
+            cwd: std::path::PathBuf::new(),
+            on_switch_to_yolo: None,
         };
         let result = ipython::execute_ipython(
             &options,
@@ -256,6 +259,9 @@ async fn ipython_details_carry_the_cell_edit_diffs() {
             kill_calls: AtomicUsize::new(0),
         }),
         on_late_sent_agent_message: None,
+        approval_gate: None,
+        cwd: std::path::PathBuf::new(),
+        on_switch_to_yolo: None,
     };
     let result = ipython::execute_ipython(&options, "edit()", None, None, None, None)
         .await
@@ -280,6 +286,9 @@ fn golden_schema_group_matches_ts() {
                 "/tmp",
                 IpythonToolOptions {
                     on_late_sent_agent_message: None,
+                    approval_gate: None,
+                    cwd: std::path::PathBuf::from("/tmp"),
+                    on_switch_to_yolo: None,
                     provisioner: Arc::new(MockProvisioner {
                         kernel: Arc::new(MockKernel {
                             executions: Mutex::new(Vec::new()),

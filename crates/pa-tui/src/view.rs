@@ -84,6 +84,7 @@ pub struct AgentView {
     pub model_picker: Option<crate::model_picker::ModelPicker>,
     pub tree_selector: Option<crate::tree_selector::TreeSelector>,
     pub confirm: Option<crate::confirm::ConfirmPanel>,
+    pub approval_panel: Option<crate::approval_panel::ApprovalPanel>,
     pub provider_auth: Option<crate::provider_auth::ProviderAuthSelector>,
     pub auth_panel: Option<crate::auth_panel::AuthPanel>,
     pub fork_selector: Option<crate::user_message_selector::UserMessageSelector>,
@@ -263,7 +264,8 @@ impl AgentView {
         // confirm, the share loader, the reload box, and the auth panel
         // (its own channel drives it). None of them leaves a paste to the
         // editor behind.
-        if self.factory_view.is_some()
+        if self.approval_panel.is_some()
+            || self.factory_view.is_some()
             || self.heartbeats_picker.is_some()
             || self.bash_view.is_some()
             || self.goal_panel.is_some()
@@ -304,6 +306,7 @@ impl AgentView {
             model_picker: None,
             tree_selector: None,
             confirm: None,
+            approval_panel: None,
             provider_auth: None,
             auth_panel: None,
             fork_selector: None,

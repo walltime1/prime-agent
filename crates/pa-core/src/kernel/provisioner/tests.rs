@@ -708,3 +708,85 @@ for line in sys.stdin:
         "the fatal classification must not auto-retry the boot"
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn update_sandbox_updates_policy_and_lazily_recycles_running_kernel() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const FAKE_KERNEL: &str = r#"#!/usr/bin/env python3
+import json
+import os
+import sys
+
+base = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(base, "starts"), "a") as f:
+    f.write("x")
+print(json.dumps({"event": "ready", "protocol": 3, "python": "3.13.0"}), flush=True)
+for line in sys.stdin:
+    try:
+        req = json.loads(line)
+    except Exception:
+        continue
+    req_type = req.get("type")
+    if req_type == "execute":
+        print(json.dumps({"event": "done", "id": req.get("id"), "status": "ok", "stdout": "", "stderr": ""}), flush=True)
+    elif req_type == "shutdown":
+        with open(os.path.join(base, "shutdowns"), "a") as f:
+            f.write("1")
+        print(json.dumps({"event": "done", "id": req.get("id"), "status": "ok"}), flush=True)
+        break
+"#;
+
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let python = dir.path().join("fake-kernel");
+    std::fs::write(&python, FAKE_KERNEL).expect("write fake kernel");
+    std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod fake kernel");
+
+    let provisioner = IpythonKernelProvisioner::new(
+        dir.path(),
+        IpythonKernelProvisionerOptions {
+            python: Some(python.clone()),
+            ..Default::default()
+        },
+    );
+
+    // Updating sandbox when no kernel is running stores the policy without spawning.
+    let ro_policy = crate::sandbox::resolve(&crate::sandbox::SandboxInputs {
+        mode: pa_types::sandbox::SandboxMode::ReadOnly,
+        network: pa_types::sandbox::SandboxNetworkMode::None,
+        settings: None,
+        cwd: dir.path().to_path_buf(),
+        home: dir.path().to_path_buf(),
+        python: python.clone(),
+        venv: None,
+        python_skills: Vec::new(),
+        shell_path: None,
+        global_harness_dir: None,
+        workspace_harness_dir: None,
+        snapshot_dir: None,
+        orphan_journal: None,
+    })
+    .unwrap();
+    provisioner.update_sandbox(ro_policy.clone()).await;
+    assert_eq!(provisioner.sandbox_policy(), ro_policy);
+    assert!(!provisioner.has_running_kernel());
+
+    // Switch back to unbounded so our fake python script can run directly, boot it, then recycle.
+    provisioner.update_sandbox(None).await;
+    let _mgr = provisioner.ensure(None, None).await.expect("kernel boots");
+    assert!(provisioner.has_running_kernel());
+
+    provisioner.update_sandbox(ro_policy.clone()).await;
+    assert_eq!(provisioner.sandbox_policy(), ro_policy);
+    assert!(
+        !provisioner.has_running_kernel(),
+        "update_sandbox lazily recycles the running kernel"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("shutdowns")).unwrap_or_default(),
+        "1",
+        "update_sandbox gracefully shuts down the running kernel"
+    );
+}

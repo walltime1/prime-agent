@@ -65,6 +65,8 @@ pub fn command_plane(command_type: &str) -> DaemonCommandPlane {
         | "cycle_model"
         | "set_scoped_models"
         | "set_thinking_level"
+        | "set_sandbox_mode"
+        | "resolve_tool_approval"
         | "set_service_tier"
         | "cycle_thinking_level"
         | "set_transport"

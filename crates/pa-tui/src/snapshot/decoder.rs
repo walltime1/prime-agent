@@ -16,6 +16,12 @@ pub enum TurnUpdate {
     SessionInfoChanged { name: Option<String> },
     /// `service_tier_changed`: the session's effective service tier.
     ServiceTierChanged { tier: String },
+    /// `sandbox_mode_changed`: the session's effective OS sandbox posture.
+    SandboxModeChanged {
+        mode: pa_types::sandbox::SandboxMode,
+    },
+    /// `tool_approval_requested`: interactive approval prompt before running a `python_repl` cell.
+    ToolApprovalRequested(pa_types::sandbox::ToolApprovalRequest),
     /// `message_start` with a user message.
     UserMessage(String),
     /// An assistant message; `streaming` distinguishes in-flight from
@@ -227,6 +233,19 @@ pub fn event_to_update(event: &Value) -> Option<TurnUpdate> {
                 .unwrap_or_default()
                 .to_string(),
         }),
+        "sandbox_mode_changed" => event
+            .get("mode")
+            .or_else(|| event.get("sandboxMode"))
+            .and_then(|value| {
+                serde_json::from_value::<pa_types::sandbox::SandboxMode>(value.clone()).ok()
+            })
+            .map(|mode| TurnUpdate::SandboxModeChanged { mode }),
+        "tool_approval_requested" => {
+            let payload = event.get("request").unwrap_or(event);
+            serde_json::from_value::<pa_types::sandbox::ToolApprovalRequest>(payload.clone())
+                .ok()
+                .map(TurnUpdate::ToolApprovalRequested)
+        }
         "turn_end" => {
             let error = event
                 .get("error")

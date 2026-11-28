@@ -60,7 +60,7 @@ pub use env::parse_bool_override;
 pub use event::TelemetryEvent;
 pub use events::{
     AgentInstallationStage, AgentStartupStage, OnboardingStage, RunTrigger, SandboxKernelStarted,
-    ToolCategory, UpdateHomebrewRefusal,
+    SandboxModeChanged, ToolApprovalResolved, ToolCategory, UpdateHomebrewRefusal,
 };
 pub use install_id::{existing_install_id, install_id};
 pub use platform::{base_properties, SCHEMA_VERSION};

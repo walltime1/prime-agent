@@ -148,6 +148,46 @@ impl SandboxKernelStarted {
     }
 }
 
+/// `sandbox_mode_changed`: sandbox mode or network posture changed. Primitive vocabulary
+/// only: mode, network, and source (`"hotkey"`, `"settings"`, `"approval"`, `"unknown"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SandboxModeChanged {
+    pub mode: &'static str,
+    pub network: &'static str,
+    pub source: &'static str,
+}
+
+impl SandboxModeChanged {
+    /// Record this sandbox mode change on the telemetry client (fire-and-forget).
+    pub fn track(&self, client: &TelemetryClient) {
+        let mut properties = Properties::new();
+        properties.set("mode", Value::from(self.mode));
+        properties.set("network", Value::from(self.network));
+        properties.set("source", Value::from(self.source));
+        client.track("sandbox_mode_changed", properties);
+    }
+}
+
+/// `tool_approval_resolved`: an interactive tool approval prompt resolved. Primitive
+/// vocabulary only: kind, decision, and risky flag; never code, commands, or paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolApprovalResolved {
+    pub kind: &'static str,
+    pub decision: &'static str,
+    pub risky: bool,
+}
+
+impl ToolApprovalResolved {
+    /// Record this tool approval resolution on the telemetry client (fire-and-forget).
+    pub fn track(&self, client: &TelemetryClient) {
+        let mut properties = Properties::new();
+        properties.set("kind", Value::from(self.kind));
+        properties.set("decision", Value::from(self.decision));
+        properties.set("risky", Value::from(self.risky));
+        client.track("tool_approval_resolved", properties);
+    }
+}
+
 /// `agent startup stage`: one startup phase's timing.
 #[derive(Debug, Clone)]
 pub struct AgentStartupStage {
@@ -255,7 +295,8 @@ impl UpdateHomebrewRefusal {
 mod tests {
     use super::*;
     use crate::catalog::{
-        RUN_TRIGGERS, SANDBOX_BACKENDS, SANDBOX_MODES, SANDBOX_NETWORK_MODES, TOOL_CATEGORIES,
+        RUN_TRIGGERS, SANDBOX_BACKENDS, SANDBOX_MODES, SANDBOX_MODE_CHANGE_SOURCES,
+        SANDBOX_NETWORK_MODES, TOOL_APPROVAL_DECISIONS, TOOL_APPROVAL_KINDS, TOOL_CATEGORIES,
     };
 
     #[test]
@@ -312,5 +353,27 @@ mod tests {
         assert!(SANDBOX_NETWORK_MODES.contains(&event.network));
         // Inert client proves `track` is synchronous and fire-and-forget.
         event.track(&TelemetryClient::inert());
+    }
+
+    #[test]
+    fn sandbox_mode_changed_and_tool_approval_resolved_track_with_catalog_vocabulary() {
+        let mode_event = SandboxModeChanged {
+            mode: "read-only",
+            network: "none",
+            source: "hotkey",
+        };
+        assert!(SANDBOX_MODES.contains(&mode_event.mode));
+        assert!(SANDBOX_NETWORK_MODES.contains(&mode_event.network));
+        assert!(SANDBOX_MODE_CHANGE_SOURCES.contains(&mode_event.source));
+        mode_event.track(&TelemetryClient::inert());
+
+        let approval_event = ToolApprovalResolved {
+            kind: "bash-command",
+            decision: "allow-once",
+            risky: false,
+        };
+        assert!(TOOL_APPROVAL_KINDS.contains(&approval_event.kind));
+        assert!(TOOL_APPROVAL_DECISIONS.contains(&approval_event.decision));
+        approval_event.track(&TelemetryClient::inert());
     }
 }

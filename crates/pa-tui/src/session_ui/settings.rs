@@ -247,6 +247,14 @@ impl SessionUi {
             values.theme = settings.theme().unwrap_or_else(|| "prime".to_string());
             // The tier row preselects the saved default instead of the struct default.
             values.default_service_tier = settings.default_service_tier();
+            values.sandbox_mode = state
+                .get("sandboxMode")
+                .and_then(Value::as_str)
+                .map_or_else(|| settings.sandbox_mode(), str::to_string);
+            values.sandbox_network = state
+                .get("sandboxNetwork")
+                .and_then(Value::as_str)
+                .map_or_else(|| settings.sandbox_network(), str::to_string);
         } else {
             values.show_images = true;
             values.auto_resize_images = true;
@@ -262,6 +270,16 @@ impl SessionUi {
             values.theme = "prime".to_string();
             // No settings seam: the tier row reads "default", never a blank value.
             values.default_service_tier = "default".to_string();
+            values.sandbox_mode = state
+                .get("sandboxMode")
+                .and_then(Value::as_str)
+                .unwrap_or("workspace-write")
+                .to_string();
+            values.sandbox_network = state
+                .get("sandboxNetwork")
+                .and_then(Value::as_str)
+                .unwrap_or("none")
+                .to_string();
         }
         // This surface ships the builtin themes.
         values.available_themes = pa_types::themes::BUILTIN_THEME_NAMES
@@ -611,6 +629,62 @@ impl SessionUi {
                 }
                 view.theme = crate::app::load_theme(value);
             }
+            "sandbox-mode" => {
+                if let Some(settings) = &self.client_settings {
+                    if let Err(error) = settings.set_sandbox_mode(value) {
+                        self.error_row(&format!("{error:#}"), view);
+                        return;
+                    }
+                }
+                let Ok(mode) = serde_json::from_value::<pa_types::sandbox::SandboxMode>(
+                    Value::String(value.to_string()),
+                ) else {
+                    self.error_row(&format!("Unknown sandbox mode: {value}"), view);
+                    return;
+                };
+                self.daemon_switch(
+                    DaemonCommand::SetSandboxMode {
+                        id: None,
+                        active_session_id: Some(self.active_session_id.clone()),
+                        mode,
+                        network: None,
+                        rest: Map::default(),
+                    },
+                    view,
+                )
+                .await;
+                self.sandbox_mode = Some(mode);
+                self.rebuild_tray(view);
+            }
+            "sandbox-network" => {
+                if let Some(settings) = &self.client_settings {
+                    if let Err(error) = settings.set_sandbox_network(value) {
+                        self.error_row(&format!("{error:#}"), view);
+                        return;
+                    }
+                }
+                let Ok(network) = serde_json::from_value::<pa_types::sandbox::SandboxNetworkMode>(
+                    Value::String(value.to_string()),
+                ) else {
+                    self.error_row(&format!("Unknown sandbox network mode: {value}"), view);
+                    return;
+                };
+                let mode = self
+                    .sandbox_mode
+                    .or(view.chrome.sandbox_mode)
+                    .unwrap_or(pa_types::sandbox::SandboxMode::WorkspaceWrite);
+                self.daemon_switch(
+                    DaemonCommand::SetSandboxMode {
+                        id: None,
+                        active_session_id: Some(self.active_session_id.clone()),
+                        mode,
+                        network: Some(network),
+                        rest: Map::default(),
+                    },
+                    view,
+                )
+                .await;
+            }
             other => {
                 self.error_row(&format!("Unknown setting: {other}"), view);
             }
@@ -629,6 +703,78 @@ impl SessionUi {
                 self.error_row(&format!("{error:#}"), view);
             }
         }
+    }
+
+    /// Cycle the live sandbox mode (`Shift+Tab`) and update the tray badge.
+    pub(super) async fn cycle_sandbox_mode(&mut self, view: &mut AgentView) {
+        let current = self
+            .sandbox_mode
+            .or(view.chrome.sandbox_mode)
+            .unwrap_or(pa_types::sandbox::SandboxMode::WorkspaceWrite);
+        let next = current.cycle_next();
+        if let Err(error) = self
+            .bounded_request(
+                Duration::from_millis(UI_REQUEST_TIMEOUT_MS),
+                DaemonCommand::SetSandboxMode {
+                    id: None,
+                    active_session_id: Some(self.active_session_id.clone()),
+                    mode: next,
+                    network: None,
+                    rest: Map::default(),
+                },
+            )
+            .await
+        {
+            self.error_row(&format!("{error:#}"), view);
+            return;
+        }
+        self.sandbox_mode = Some(next);
+        self.rebuild_tray(view);
+        self.note(
+            &format!("Sandbox mode: {} ({})", next.short_label(), next.as_str()),
+            view,
+        );
+    }
+
+    /// One key press while the inline tool-approval panel owns the dock.
+    pub(super) async fn handle_approval_panel_key(
+        &mut self,
+        key: KeyEvent,
+        view: &mut AgentView,
+    ) -> Result<()> {
+        let Some(id) = key_event_to_id(&key) else {
+            return Ok(());
+        };
+        let (request_id, action) = {
+            let Some(panel) = view.approval_panel.as_mut() else {
+                return Ok(());
+            };
+            let kb = view.editor.keybindings();
+            let action = panel.handle_key(kb, &id);
+            (panel.request_id().to_string(), action)
+        };
+        match action {
+            crate::approval_panel::ApprovalAction::None => {}
+            crate::approval_panel::ApprovalAction::Resolve(decision) => {
+                view.approval_panel = self
+                    .pending_approvals
+                    .pop_front()
+                    .map(crate::approval_panel::ApprovalPanel::new);
+                self.daemon_switch(
+                    DaemonCommand::ResolveToolApproval {
+                        id: None,
+                        active_session_id: Some(self.active_session_id.clone()),
+                        request_id,
+                        decision,
+                        rest: Map::default(),
+                    },
+                    view,
+                )
+                .await;
+            }
+        }
+        self.dirty = true;
+        Ok(())
     }
 
     /// A session-switch daemon command: the result never blocks the menu.

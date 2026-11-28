@@ -39,7 +39,7 @@ pub use tools::render_utils::{get_image_dimensions_prefix, IMAGE_DIMENSIONS_PREF
 pub use tools::ipython::{
     create_ipython_tool_definition, sent_agent_message_json, ExecuteResult, ExecuteStatus,
     IpythonKernelProvisioner, IpythonToolOptions, KernelAttachment, KernelErrorInfo,
-    KernelExecutor, LateSentAgentMessageHandler,
+    KernelExecutor, LateSentAgentMessageHandler, OnSwitchToYolo,
 };
 // RLM kernel subsystem: persistent IPython kernel lifecycle.
 pub mod agent_traces;

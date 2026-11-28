@@ -101,6 +101,8 @@ impl Worker {
             "replace_acp_mcp_servers" => self.handle_replace_acp_mcp_servers(payload),
             "set_model" => self.handle_set_model(payload).await,
             "set_thinking_level" => self.handle_set_thinking_level(payload).await,
+            "set_sandbox_mode" => self.handle_set_sandbox_mode(payload).await,
+            "resolve_tool_approval" => self.handle_resolve_tool_approval(payload),
             "cycle_model" => self.handle_cycle_model(payload).await,
             "set_scoped_models" => self.handle_set_scoped_models(payload),
             "cycle_thinking_level" => self.handle_cycle_thinking_level().await,

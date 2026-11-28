@@ -143,6 +143,8 @@ async fn abort_during_a_kernel_cell_settles_the_turn_immediately() {
 
     let engine = create_session(SessionEngineConfig {
         workspace_selection: pa_core::session_engine::engine::WorkspaceSelection::Inherit,
+        approval_gate: None,
+        on_switch_to_yolo: None,
         on_late_sent_agent_message: None,
         semantic_edges: None,
         cron_store: None,

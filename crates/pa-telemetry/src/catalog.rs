@@ -1265,6 +1265,27 @@ pub(crate) const SANDBOX_BACKENDS: &[&str] = &["none", "seatbelt", "bubblewrap",
 
 pub(crate) const SANDBOX_NETWORK_MODES: &[&str] = &["none", "full", "unknown"];
 
+pub(crate) const SANDBOX_MODE_CHANGE_SOURCES: &[&str] =
+    &["hotkey", "settings", "approval", "unknown"];
+
+pub(crate) const TOOL_APPROVAL_KINDS: &[&str] = &[
+    "file-edit",
+    "bash-command",
+    "risky-bash-command",
+    "opaque-python",
+    "unknown",
+];
+
+pub(crate) const TOOL_APPROVAL_DECISIONS: &[&str] = &[
+    "allow-once",
+    "allow-session-edits",
+    "allow-session-prefix",
+    "switch-to-yolo",
+    "deny",
+    "aborted",
+    "unknown",
+];
+
 /// `sandbox_kernel_started`: the kernel sandbox boundary booted. Primitives only:
 /// the effective mode/backend/network vocabulary slugs and the env-scrub flag;
 /// never extra roots, paths, or any content.
@@ -1282,6 +1303,39 @@ const SANDBOX_KERNEL_STARTED: EventRule = EventRule {
     ],
 };
 
+/// `sandbox_mode_changed`: the user or session changed the sandbox posture.
+/// Primitives only: mode, network, and source vocabulary slugs; never paths or commands.
+const SANDBOX_MODE_CHANGED: EventRule = EventRule {
+    name: "sandbox_mode_changed",
+    since: 2,
+    properties: &[
+        ("mode", required(enum_rule(SANDBOX_MODES, "unknown"))),
+        (
+            "network",
+            required(enum_rule(SANDBOX_NETWORK_MODES, "unknown")),
+        ),
+        (
+            "source",
+            required(enum_rule(SANDBOX_MODE_CHANGE_SOURCES, "unknown")),
+        ),
+    ],
+};
+
+/// `tool_approval_resolved`: an interactive tool approval prompt settled.
+/// Primitives only: action kind, decision slug, and risky flag; never code, commands, or paths.
+const TOOL_APPROVAL_RESOLVED: EventRule = EventRule {
+    name: "tool_approval_resolved",
+    since: 2,
+    properties: &[
+        ("kind", required(enum_rule(TOOL_APPROVAL_KINDS, "unknown"))),
+        (
+            "decision",
+            required(enum_rule(TOOL_APPROVAL_DECISIONS, "unknown")),
+        ),
+        ("risky", required(boolean())),
+    ],
+};
+
 /// Every catalogued event, flattened.
 #[must_use]
 pub fn catalog() -> Vec<&'static EventRule> {
@@ -1289,6 +1343,8 @@ pub fn catalog() -> Vec<&'static EventRule> {
         &HARNESS_REFINEMENTS_CHANGED,
         &WEB_SEARCH_PROVIDER_CHANGED,
         &SANDBOX_KERNEL_STARTED,
+        &SANDBOX_MODE_CHANGED,
+        &TOOL_APPROVAL_RESOLVED,
         &AGENT_STARTED,
         &AGENT_RUN_COMPLETED,
         &AGENT_SESSION_ENDED,
@@ -1630,5 +1686,49 @@ mod tests {
         assert_eq!(properties.get("backend"), Some(&json!("unknown")));
         assert_eq!(properties.get("network"), Some(&json!("unknown")));
         assert_eq!(properties.get("scrub_env"), None, "non-boolean dropped");
+    }
+
+    #[test]
+    fn sandbox_mode_changed_and_tool_approval_resolved_are_primitives_only() {
+        let mode_rule = lookup("sandbox_mode_changed").expect("catalogued");
+        let mode_keys: Vec<&str> = mode_rule.properties.iter().map(|(key, _)| *key).collect();
+        assert_eq!(mode_keys, vec!["mode", "network", "source"]);
+
+        let mut props = Properties::new();
+        props.set("mode", json!("workspace-write"));
+        props.set("network", json!("none"));
+        props.set("source", json!("hotkey"));
+        props.set("path", json!("/secret"));
+        let adjusted = sanitize("sandbox_mode_changed", &mut props);
+        assert_eq!(props.get("mode"), Some(&json!("workspace-write")));
+        assert_eq!(props.get("network"), Some(&json!("none")));
+        assert_eq!(props.get("source"), Some(&json!("hotkey")));
+        assert!(props.get("path").is_none());
+        assert_eq!(adjusted, 1);
+
+        let approval_rule = lookup("tool_approval_resolved").expect("catalogued");
+        let approval_keys: Vec<&str> = approval_rule
+            .properties
+            .iter()
+            .map(|(key, _)| *key)
+            .collect();
+        assert_eq!(approval_keys, vec!["kind", "decision", "risky"]);
+
+        let mut approval_props = Properties::new();
+        approval_props.set("kind", json!("risky-bash-command"));
+        approval_props.set("decision", json!("deny"));
+        approval_props.set("risky", json!(true));
+        approval_props.set("command", json!("rm -rf /"));
+        approval_props.set("code", json!("os.remove('x')"));
+        let adjusted = sanitize("tool_approval_resolved", &mut approval_props);
+        assert_eq!(
+            approval_props.get("kind"),
+            Some(&json!("risky-bash-command"))
+        );
+        assert_eq!(approval_props.get("decision"), Some(&json!("deny")));
+        assert_eq!(approval_props.get("risky"), Some(&json!(true)));
+        assert!(approval_props.get("command").is_none());
+        assert!(approval_props.get("code").is_none());
+        assert_eq!(adjusted, 2);
     }
 }

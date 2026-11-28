@@ -53,7 +53,9 @@ fn tabs_partition_the_settings_rows() {
                     "follow-up-mode",
                     "quiet-startup",
                     "warnings",
-                    "autocompact-threshold"
+                    "autocompact-threshold",
+                    "sandbox-mode",
+                    "sandbox-network",
                 ]
             ),
             (
@@ -732,4 +734,36 @@ fn threshold_control_retains_off_grid_values_and_selects_neighbouring_presets() 
             );
         }
     }
+}
+
+#[test]
+fn searching_sandbox_returns_mode_and_network_rows() {
+    let values = SettingsCurrentValues {
+        sandbox_mode: "workspace-write".to_string(),
+        sandbox_network: "none".to_string(),
+        ..Default::default()
+    };
+    let mut menu = SettingsMenu::new(settings_menu_rows(&values));
+    menu.paste("Sandbox");
+    let matched_ids: Vec<&str> = menu.tabs[menu.tab]
+        .filtered
+        .iter()
+        .map(|&index| menu.rows[index].id)
+        .collect();
+    assert_eq!(matched_ids, vec!["sandbox-mode", "sandbox-network"]);
+    assert_eq!(
+        menu.handle_key("right", &kb()),
+        SettingsMenuAction::Change {
+            id: "sandbox-mode",
+            value: "read-only".to_string(),
+        }
+    );
+    menu.handle_key("down", &kb());
+    assert_eq!(
+        menu.handle_key("right", &kb()),
+        SettingsMenuAction::Change {
+            id: "sandbox-network",
+            value: "full".to_string(),
+        }
+    );
 }

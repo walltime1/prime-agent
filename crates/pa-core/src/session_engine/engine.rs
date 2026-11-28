@@ -128,6 +128,21 @@ pub struct SessionEngineConfig {
     /// Workspace override from the host (the `--workspace` flag). `Inherit`
     /// keeps the session's recorded workspace; the chosen one is recorded for the session.
     pub workspace_selection: WorkspaceSelection,
+    /// Optional interactive approval gate for `python_repl` cells; `None` creates a
+    /// headless gate (no emitter, never blocks).
+    pub approval_gate: Option<Arc<crate::sandbox::approval::SessionApprovalGate>>,
+    /// Invoked when the user chooses `SwitchToYolo` on an interactive approval prompt.
+    pub on_switch_to_yolo: Option<crate::tools::ipython::OnSwitchToYolo>,
+}
+
+struct SandboxResolveContext {
+    settings: Option<crate::settings::types::SandboxSettings>,
+    cwd: PathBuf,
+    shell_path: Option<PathBuf>,
+    python_skills: Vec<crate::kernel::bootstrap::KernelPythonSkill>,
+    session_artifact_dir: Option<PathBuf>,
+    global_harness_dir: PathBuf,
+    workspace_harness_dir: Option<PathBuf>,
 }
 
 pub struct SessionEngine {
@@ -176,6 +191,9 @@ pub struct SessionEngine {
     /// The operating instructions appended to this session's system prompt (an agent blueprint
     /// body, `APPEND_SYSTEM.md`, or `--append-system-prompt`): `/agent save` writes them back.
     pub append_system_prompt: String,
+    /// Per-session interactive approval gate for `python_repl` cells.
+    pub approval_gate: Arc<crate::sandbox::approval::SessionApprovalGate>,
+    sandbox_context: SandboxResolveContext,
 }
 
 /// Skill overrides for built-in integrations the user is not logged into,
@@ -306,7 +324,8 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
     // The sandbox inputs that must survive `settings` moving into the
     // resource loader below.
     let sandbox_settings = settings.settings().sandbox.clone();
-    let sandbox_mode = settings.settings().sandbox_mode();
+    let sandbox_mode = settings.get_sandbox_mode();
+    let sandbox_network = settings.get_sandbox_network();
 
     let (mcp_skill_overrides, mcp_generic_servers, built_manager) =
         mcp_gating(&settings, config.agent_dir.clone()).await?;
@@ -554,6 +573,22 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
         &global_harness_dir,
         workspace_harness_dir.as_deref(),
     )?;
+    let sandbox_context = SandboxResolveContext {
+        settings: sandbox_settings,
+        cwd: cwd.clone(),
+        shell_path: kernel_shell_path.clone(),
+        python_skills: python_skills.clone(),
+        session_artifact_dir: session_artifact_dir.clone(),
+        global_harness_dir: global_harness_dir.clone(),
+        workspace_harness_dir: workspace_harness_dir.clone(),
+    };
+    let approval_gate = config.approval_gate.take().unwrap_or_else(|| {
+        Arc::new(crate::sandbox::approval::SessionApprovalGate::new(
+            sandbox_mode,
+            sandbox_network,
+            None,
+        ))
+    });
 
     // `rlm.skills.*` resolves the passive cluster index in the prompt inventory; a JIT read
     // counts as a skill use (`skill_use_count`) when the session reports telemetry.
@@ -619,6 +654,9 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
             super::runtime_wiring::ipython_tool_options(
                 provisioner.clone(),
                 config.on_late_sent_agent_message.clone(),
+                Some(Arc::clone(&approval_gate)),
+                cwd.clone(),
+                config.on_switch_to_yolo.clone(),
             ),
         );
         tools.push(Arc::new(
@@ -1062,10 +1100,52 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
         provisioner,
         harness_write_dir,
         append_system_prompt: resources.append_system_prompt.join("\n\n"),
+        approval_gate,
+        sandbox_context,
     })
 }
 
 impl SessionEngine {
+    /// Update the live sandbox posture for this session: resolves the new OS sandbox
+    /// policy, updates [`SessionEngine::approval_gate`], and lazily recycles the kernel
+    /// with a snapshot flush so the next cell boots under the new boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the new sandbox policy cannot be resolved for the workspace
+    /// or platform (leaving the existing gate and kernel untouched).
+    pub async fn update_sandbox(
+        &self,
+        mode: pa_types::sandbox::SandboxMode,
+        network: Option<pa_types::sandbox::SandboxNetworkMode>,
+    ) -> anyhow::Result<(
+        pa_types::sandbox::SandboxMode,
+        pa_types::sandbox::SandboxNetworkMode,
+    )> {
+        let (_, current_network) = self.approval_gate.state();
+        let effective_network = network.unwrap_or(current_network);
+        let mut settings = self.sandbox_context.settings.clone().unwrap_or_default();
+        settings.mode = Some(mode);
+        settings.network = Some(effective_network);
+        let policy = super::runtime_wiring::resolve_sandbox(
+            mode,
+            Some(&settings),
+            &self.sandbox_context.cwd,
+            self.sandbox_context.shell_path.as_ref(),
+            &self.sandbox_context.python_skills,
+            self.sandbox_context.session_artifact_dir.as_deref(),
+            &self.sandbox_context.global_harness_dir,
+            self.sandbox_context.workspace_harness_dir.as_deref(),
+        )?;
+        let updated = self.approval_gate.set_mode(mode, Some(effective_network));
+        self.provisioner.update_sandbox(policy).await;
+        Ok(updated)
+    }
+
+    /// Update the kernel provisioner's OS sandbox policy directly and lazily recycle.
+    pub async fn update_sandbox_policy(&self, policy: Option<crate::sandbox::SandboxPolicy>) {
+        self.provisioner.update_sandbox(policy).await;
+    }
     /// After a model switch, the `model.info` handler and the usage
     /// estimate's context window follow the model the session now runs.
     pub fn update_model_facts(&self, model: &pa_types::ai::Model) {

@@ -122,6 +122,8 @@ pub struct ChromeState {
     /// The session's service tier as its wire name: `fast` for priority, the
     /// tier name for any other non-default tier; `None` or `default` renders no badge.
     pub service_tier: Option<String>,
+    /// Effective OS sandbox posture (`None` hides the badge).
+    pub sandbox_mode: Option<pa_types::sandbox::SandboxMode>,
     /// Startup warning (tmux keyboard setup), rendered as a status row.
     pub tmux_notice: Option<String>,
     /// Tray override label: while the Ctrl+C exit hint is armed, it
@@ -634,6 +636,29 @@ pub fn render_tray_with_hint(
     }
     let left_width: usize = left.iter().map(|s| str_width(&s.content)).sum();
     let right_width: usize = right.iter().map(|s| str_width(&s.content)).sum();
+    if state.tray_override.is_none() {
+        if let Some(mode) = state.sandbox_mode {
+            let badge_color = match mode {
+                pa_types::sandbox::SandboxMode::Off => ThemeColor::Dim,
+                pa_types::sandbox::SandboxMode::ReadOnly => ThemeColor::Accent,
+                pa_types::sandbox::SandboxMode::WorkspaceWrite => ThemeColor::Muted,
+                pa_types::sandbox::SandboxMode::DangerFullAccess => ThemeColor::Warning,
+            };
+            let sep = if left.is_empty() { "" } else { "  " };
+            let label = mode.short_label();
+            let hint_suffix = " (Shift+Tab)";
+            let base_extra = str_width(sep) + str_width(label);
+            let with_hint_extra = base_extra + str_width(hint_suffix);
+            if !sep.is_empty() {
+                left.push(Span::styled(sep.to_string(), muted));
+            }
+            left.push(Span::styled(label.to_string(), theme.fg_style(badge_color)));
+            if left_width + with_hint_extra + right_width + 2 <= width {
+                left.push(Span::styled(hint_suffix.to_string(), dim));
+            }
+        }
+    }
+    let left_width: usize = left.iter().map(|s| str_width(&s.content)).sum();
     let gap = width.saturating_sub(left_width + right_width);
     let mut line: Line = Vec::new();
     line.extend(left);

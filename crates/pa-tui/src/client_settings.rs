@@ -257,4 +257,29 @@ pub trait ClientSettings: Send + Sync {
     fn set_telemetry_notice_shown(&self) -> Result<()> {
         Ok(())
     }
+    /// `sandbox.mode` (`workspace-write`/`read-only`/`danger-full-access`/`off`;
+    /// default `workspace-write`).
+    fn sandbox_mode(&self) -> String {
+        "workspace-write".to_string()
+    }
+    /// Persist `sandbox.mode` to the global scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` when the mode is unknown or the settings store fails or is unavailable.
+    fn set_sandbox_mode(&self, _mode: &str) -> Result<()> {
+        anyhow::bail!("Sandbox settings are unavailable")
+    }
+    /// `sandbox.network` (`none`/`full`; default `none`).
+    fn sandbox_network(&self) -> String {
+        "none".to_string()
+    }
+    /// Persist `sandbox.network` to the global scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` when the network mode is unknown or the settings store fails or is unavailable.
+    fn set_sandbox_network(&self, _network: &str) -> Result<()> {
+        anyhow::bail!("Sandbox settings are unavailable")
+    }
 }

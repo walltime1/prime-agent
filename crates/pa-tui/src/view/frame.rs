@@ -109,7 +109,8 @@ impl AgentView {
         };
         // The tree and fork selectors mount in the editor container
         // (TS `showSelector`): an auto-height pane over the dock's rows.
-        let selector_dock: Option<Vec<Line>> = if self.tree_selector.is_some()
+        let selector_dock: Option<Vec<Line>> = if self.approval_panel.is_some()
+            || self.tree_selector.is_some()
             || self.fork_selector.is_some()
             || self.share_loader.is_some()
             || self.confirm.is_some()
@@ -121,7 +122,9 @@ impl AgentView {
             // TS's editor container holds the prompt context and the
             // editor; `showSelector` replaces the editor part.
             let mut dock = render_prompt_context(&self.detail_label(), &self.theme, width);
-            if let Some(selector) = self.tree_selector.as_ref() {
+            if let Some(panel) = self.approval_panel.as_ref() {
+                dock.extend(panel.render(&self.theme, width, self.editor.keybindings()));
+            } else if let Some(selector) = self.tree_selector.as_ref() {
                 dock.extend(selector.render(&self.theme, width, self.editor.keybindings()));
             } else if let Some(selector) = self.fork_selector.as_ref() {
                 dock.extend(selector.render(&self.theme, width, self.editor.keybindings()));
@@ -289,6 +292,7 @@ impl AgentView {
             || self.fork_selector.is_some()
             || self.share_loader.is_some()
             || self.confirm.is_some()
+            || self.approval_panel.is_some()
             || self.provider_auth.is_some()
             || self.auth_panel.is_some()
             || self.reload_box.is_some()

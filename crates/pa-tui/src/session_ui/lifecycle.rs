@@ -83,6 +83,8 @@ impl SessionUi {
             show_images: options.show_images,
             fullscreen_mouse: options.fullscreen_mouse,
             service_tier: None,
+            sandbox_mode: None,
+            pending_approvals: std::collections::VecDeque::new(),
             pending_model_fallback_message: None,
             speed_display_enabled: false,
             speed_stats: None,
@@ -434,6 +436,7 @@ impl SessionUi {
             .on(crate::interactive::reconnect::ConnectionEvent::Attached);
         self.session_name.clone_from(&reconstructed.session_name);
         self.service_tier.clone_from(&reconstructed.service_tier);
+        self.sandbox_mode = reconstructed.sandbox_mode;
         self.pending_model_fallback_message = reconstructed.model_fallback_message;
         self.session_file = attach
             .snapshot
@@ -625,6 +628,8 @@ impl SessionUi {
             // owning the frame over the rebind with stale content.
             view.goal_panel = None;
             view.info_panel = None;
+            view.approval_panel = None;
+            self.pending_approvals.clear();
             self.speed_stats = None;
             view.chrome.speed_text = None;
         }
@@ -662,6 +667,7 @@ impl SessionUi {
         // The tray badge mirrors the session-scoped tier on every rebuild: an
         // attach that reports no tier clears the previous session's badge.
         view.chrome.service_tier.clone_from(&self.service_tier);
+        view.chrome.sandbox_mode = self.sandbox_mode;
         // The tray's effort suffix moves with the same snapshot; the bare name
         // wins when the state reports neither.
         view.chrome.thinking_suffix = self.pending_thinking_suffix.take();

@@ -831,6 +831,8 @@ pub(crate) async fn build_headless_engine_with(
     let engine = pa_core::session_engine::engine::create_session(
         pa_core::session_engine::engine::SessionEngineConfig {
             workspace_selection: options.session.workspace_selection.clone(),
+            approval_gate: None,
+            on_switch_to_yolo: None,
             on_late_sent_agent_message,
             cron_store: None,
             semantic_edges,

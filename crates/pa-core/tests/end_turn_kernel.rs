@@ -171,6 +171,8 @@ async fn an_end_turn_cell_ends_the_turn_without_another_assistant_response() {
 
     let engine = create_session(SessionEngineConfig {
         workspace_selection: pa_core::session_engine::engine::WorkspaceSelection::Inherit,
+        approval_gate: None,
+        on_switch_to_yolo: None,
         on_late_sent_agent_message: None,
         semantic_edges: None,
         cron_store: None,

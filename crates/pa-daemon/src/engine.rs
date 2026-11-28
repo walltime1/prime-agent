@@ -27,6 +27,16 @@ pub use wire::{
 
 mod scripted;
 
+/// The `(mode, network)` sandbox posture pair returned by [`SessionEngine::sandbox_state`].
+pub type SandboxState = (
+    pa_types::sandbox::SandboxMode,
+    pa_types::sandbox::SandboxNetworkMode,
+);
+
+/// Boxed future returned by [`SessionEngine::set_sandbox_mode`].
+pub type SandboxModeFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<SandboxState>> + Send + 'a>>;
+
 /// The turn behavior a worker session runs.
 pub trait SessionEngine: Send + Sync {
     /// The session's shared MCP manager, when the engine owns one: the
@@ -496,6 +506,35 @@ pub trait SessionEngine: Send + Sync {
     fn set_rlm_max_depth(&self, max_depth: u64, global: bool) -> Result<Value> {
         let _ = global;
         Ok(json!({ "maxDepth": max_depth, "source": "chat", "globalSaved": false }))
+    }
+
+    /// The session's current sandbox mode and network posture.
+    fn sandbox_state(&self) -> SandboxState {
+        (
+            pa_types::sandbox::SandboxMode::Off,
+            pa_types::sandbox::SandboxNetworkMode::None,
+        )
+    }
+
+    /// Update the session's sandbox mode (and optional network posture) live,
+    /// lazily recycling the kernel if built.
+    fn set_sandbox_mode(
+        &self,
+        mode: pa_types::sandbox::SandboxMode,
+        network: Option<pa_types::sandbox::SandboxNetworkMode>,
+    ) -> SandboxModeFuture<'_> {
+        let network = network.unwrap_or(pa_types::sandbox::SandboxNetworkMode::None);
+        Box::pin(async move { Ok((mode, network)) })
+    }
+
+    /// Resolve a pending interactive tool-approval request by id.
+    fn resolve_tool_approval(
+        &self,
+        request_id: &str,
+        decision: pa_types::sandbox::ToolApprovalDecision,
+    ) -> bool {
+        let _ = (request_id, decision);
+        false
     }
 }
 

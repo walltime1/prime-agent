@@ -154,6 +154,10 @@ pub struct SessionSummary {
     /// session is still initializing (older workers never emit it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anthropic_warning_shown: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_mode: Option<pa_types::sandbox::SandboxMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_network: Option<pa_types::sandbox::SandboxNetworkMode>,
 }
 
 /// The session action snapshot (TS `SessionActionSnapshot`).
@@ -245,6 +249,10 @@ pub struct AgentConnectionState {
     pub active_tool_names: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_usage: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_mode: Option<pa_types::sandbox::SandboxMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_network: Option<pa_types::sandbox::SandboxNetworkMode>,
 }
 
 #[cfg(test)]

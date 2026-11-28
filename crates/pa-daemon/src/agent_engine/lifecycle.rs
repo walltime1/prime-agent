@@ -126,6 +126,13 @@ impl AgentSessionEngine {
         // Queue delivery modes arrive at create, so the engine starts
         // unseeded (None keeps the TS default "one-at-a-time").
         let queue_modes = std::sync::Mutex::new((None, None));
+        let initial_settings =
+            pa_core::settings::SettingsManager::create(&config.cwd, &config.agent_dir);
+        let approval_gate = Arc::new(pa_core::sandbox::approval::SessionApprovalGate::new(
+            initial_settings.get_sandbox_mode(),
+            initial_settings.get_sandbox_network(),
+            None,
+        ));
         Ok(Self {
             runtime,
             config,
@@ -194,6 +201,12 @@ impl AgentSessionEngine {
             progress_note_emit: std::sync::Mutex::new(None),
             model_refusal_telemetry,
             semantic_identity: std::sync::Mutex::new(None),
+            approval_gate,
+            sandbox_overridden: std::sync::atomic::AtomicBool::new(false),
+            sandbox_event_sink: std::sync::Mutex::new(None),
+            pending_approval_meta: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
         })
     }
 
@@ -302,6 +315,125 @@ impl AgentSessionEngine {
             .progress_note_emit
             .lock()
             .expect("progress note emit lock") = Some(emit);
+    }
+
+    /// Install the worker event sink used for `tool_approval_requested` and
+    /// `sandbox_mode_changed` broadcasts. Only root sessions (depth 0) attach an
+    /// interactive approval emitter so subagents never hang waiting on a prompt.
+    pub fn set_sandbox_event_sink(&self, sink: super::SandboxEventSink) {
+        *self
+            .sandbox_event_sink
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sink);
+        self.sync_approval_emitter();
+    }
+
+    /// Keep the approval gate's emitter aligned with the session's RLM depth:
+    /// depth 0 gets the interactive emitter when a sink is installed; subagents
+    /// (depth > 0) always stay headless (`None`).
+    pub(super) fn sync_approval_emitter(&self) {
+        if self.rlm_depth.load(Ordering::Relaxed) != 0 {
+            self.approval_gate.set_emitter(None);
+            return;
+        }
+        let sink = self
+            .sandbox_event_sink
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let Some(sink) = sink else {
+            self.approval_gate.set_emitter(None);
+            return;
+        };
+        let pending_meta = Arc::clone(&self.pending_approval_meta);
+        let emitter: pa_core::sandbox::approval::ToolApprovalEmitter = Arc::new(move |request| {
+            let risky = request.risk_reason.is_some()
+                || matches!(
+                    request.kind,
+                    pa_types::sandbox::ToolApprovalKind::RiskyBashCommand
+                );
+            pending_meta
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(request.request_id.clone(), (request.kind, risky));
+            sink(serde_json::json!({
+                "type": "tool_approval_requested",
+                "request": request,
+            }));
+        });
+        self.approval_gate.set_emitter(Some(emitter));
+    }
+
+    /// Apply a live sandbox mode/network switch: re-resolve the policy, update the
+    /// gate and (when built) lazily recycle the kernel, broadcast `sandbox_mode_changed`,
+    /// and emit fire-and-forget telemetry.
+    pub(crate) async fn apply_sandbox_mode(
+        &self,
+        mode: pa_types::sandbox::SandboxMode,
+        network: Option<pa_types::sandbox::SandboxNetworkMode>,
+        source: &'static str,
+    ) -> anyhow::Result<(
+        pa_types::sandbox::SandboxMode,
+        pa_types::sandbox::SandboxNetworkMode,
+    )> {
+        let built = self.session.lock().await.clone();
+        let updated = if let Some(core_engine) = built {
+            core_engine.update_sandbox(mode, network).await?
+        } else {
+            let (_, current_network) = self.approval_gate.state();
+            let effective_network = network.unwrap_or(current_network);
+            let cwd = self.cwd();
+            let settings = pa_core::settings::SettingsManager::create(&cwd, &self.config.agent_dir);
+            let mut block = settings
+                .global_settings()
+                .sandbox
+                .clone()
+                .unwrap_or_default();
+            block.mode = Some(mode);
+            block.network = Some(effective_network);
+            let global_harness_dir = self.config.agent_dir.join("harness");
+            let _ = pa_core::session_engine::runtime_wiring::resolve_sandbox(
+                mode,
+                Some(&block),
+                &cwd,
+                None,
+                &[],
+                None,
+                &global_harness_dir,
+                None,
+            )?;
+            self.sandbox_overridden.store(true, Ordering::Relaxed);
+            self.approval_gate.set_mode(mode, Some(effective_network))
+        };
+        if let Some(sink) = self
+            .sandbox_event_sink
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        {
+            sink(serde_json::json!({
+                "type": "sandbox_mode_changed",
+                "mode": updated.0,
+                "network": updated.1,
+            }));
+        }
+        if self.config.telemetry_disabled != Some(true) {
+            let cwd = self.cwd();
+            let agent_dir = self.config.agent_dir.clone();
+            let (updated_mode, updated_network) = updated;
+            self.runtime.spawn_blocking(move || {
+                let settings = pa_core::settings::SettingsManager::create(&cwd, &agent_dir);
+                let client =
+                    pa_core::session_engine::telemetry::build_client(&settings, &agent_dir);
+                pa_telemetry::SandboxModeChanged {
+                    mode: updated_mode.as_str(),
+                    network: updated_network.as_str(),
+                    source,
+                }
+                .track(&client);
+            });
+        }
+        Ok(updated)
     }
 
     /// The stale-row guard's deferred durable write: the terminal row
@@ -1065,8 +1197,32 @@ impl AgentSessionEngine {
             .lock()
             .expect("late agent message sink lock")
             .clone();
-        pa_core::session_engine::engine::create_session(SessionEngineConfig {
+        self.sync_approval_emitter();
+        let on_switch_to_yolo = self
+            .self_weak
+            .lock()
+            .expect("engine self weak lock")
+            .clone()
+            .map(|weak| {
+                Arc::new(move || {
+                    if let Some(engine) = weak.upgrade() {
+                        let handle = engine.runtime.handle().clone();
+                        handle.spawn(async move {
+                            let _ = engine
+                                .apply_sandbox_mode(
+                                    pa_types::sandbox::SandboxMode::DangerFullAccess,
+                                    None,
+                                    "approval",
+                                )
+                                .await;
+                        });
+                    }
+                }) as pa_core::OnSwitchToYolo
+            });
+        let engine = pa_core::session_engine::engine::create_session(SessionEngineConfig {
             workspace_selection: pa_core::session_engine::engine::WorkspaceSelection::Inherit,
+            approval_gate: Some(Arc::clone(&self.approval_gate)),
+            on_switch_to_yolo,
             on_late_sent_agent_message,
             semantic_edges,
             telemetry,
@@ -1181,23 +1337,26 @@ impl AgentSessionEngine {
                 wiring
             }),
         })
-        .await
-        .inspect(|engine| {
-            // A queue-mode switch that landed mid-build wrote only the live slot: re-apply the
-            // modes so the first build never serves a stale one.
-            let (steering_mode, follow_up_mode) = {
-                let delivery_modes = self.queue_modes.lock().expect("queue modes");
-                (
-                    delivery_modes.0.as_deref().and_then(Self::queue_mode),
-                    delivery_modes.1.as_deref().and_then(Self::queue_mode),
-                )
-            };
-            if let Some(mode) = steering_mode {
-                engine.session.agent().set_steering_mode(mode);
-            }
-            if let Some(mode) = follow_up_mode {
-                engine.session.agent().set_follow_up_mode(mode);
-            }
-        })
+        .await?;
+        // A queue-mode switch that landed mid-build wrote only the live slot: re-apply the
+        // modes so the first build never serves a stale one.
+        let (steering_mode, follow_up_mode) = {
+            let delivery_modes = self.queue_modes.lock().expect("queue modes");
+            (
+                delivery_modes.0.as_deref().and_then(Self::queue_mode),
+                delivery_modes.1.as_deref().and_then(Self::queue_mode),
+            )
+        };
+        if let Some(mode) = steering_mode {
+            engine.session.agent().set_steering_mode(mode);
+        }
+        if let Some(mode) = follow_up_mode {
+            engine.session.agent().set_follow_up_mode(mode);
+        }
+        if self.sandbox_overridden.load(Ordering::Relaxed) {
+            let (mode, network) = self.approval_gate.state();
+            let _ = engine.update_sandbox(mode, Some(network)).await;
+        }
+        Ok(engine)
     }
 }

@@ -136,6 +136,8 @@ impl Worker {
             context_usage: store.and_then(|store| {
                 crate::session_stats::store_context_usage(store, inputs.model_context_window)
             }),
+            sandbox_mode: Some(inputs.sandbox_mode),
+            sandbox_network: Some(inputs.sandbox_network),
         }
     }
 
@@ -433,6 +435,8 @@ pub(crate) struct SummaryInputs {
     pub(crate) quota_parked: bool,
     pub(crate) subagents_running: bool,
     pub(crate) progress_note: Option<String>,
+    pub(crate) sandbox_mode: pa_types::sandbox::SandboxMode,
+    pub(crate) sandbox_network: pa_types::sandbox::SandboxNetworkMode,
 }
 
 impl SummaryInputs {
@@ -459,6 +463,7 @@ impl SummaryInputs {
         user_bash: &crate::user_bash::UserBash,
         model: Option<Value>,
     ) -> Self {
+        let (sandbox_mode, sandbox_network) = engine.sandbox_state();
         Self {
             thinking_level: engine
                 .effective_thinking_level()
@@ -469,6 +474,8 @@ impl SummaryInputs {
             quota_parked: engine.is_quota_parked(),
             subagents_running: engine.has_running_subagents(),
             progress_note: engine.progress_note(),
+            sandbox_mode,
+            sandbox_network,
         }
     }
 }
@@ -482,6 +489,8 @@ pub(crate) struct ConnectionStateInputs {
     is_bash_running: bool,
     goal: Value,
     model_context_window: Option<u64>,
+    sandbox_mode: pa_types::sandbox::SandboxMode,
+    sandbox_network: pa_types::sandbox::SandboxNetworkMode,
 }
 
 impl ConnectionStateInputs {
@@ -508,6 +517,7 @@ impl ConnectionStateInputs {
         user_bash: &crate::user_bash::UserBash,
         details: ModelDetails,
     ) -> Self {
+        let (sandbox_mode, sandbox_network) = engine.sandbox_state();
         Self {
             model: details.model,
             thinking_level: engine
@@ -519,6 +529,8 @@ impl ConnectionStateInputs {
             is_bash_running: user_bash.is_running(),
             goal: engine.goal_state_value(),
             model_context_window: details.model_context_window,
+            sandbox_mode,
+            sandbox_network,
         }
     }
 }
@@ -620,6 +632,8 @@ pub(crate) fn session_summary(core: &SessionCore, inputs: SummaryInputs) -> Sess
         unfinished_action_count: Some(0),
         anthropic_warning_shown: store
             .map(crate::session_store::SessionFile::anthropic_warning_shown),
+        sandbox_mode: Some(inputs.sandbox_mode),
+        sandbox_network: Some(inputs.sandbox_network),
     }
 }
 

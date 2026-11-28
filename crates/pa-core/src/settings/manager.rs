@@ -461,6 +461,52 @@ impl SettingsManager {
         self.save_global(&["agentTraces.enabled"])
     }
 
+    /// Effective sandbox mode (global-only; project overrides are stripped at load).
+    /// Honors `PRIME_AGENT_SANDBOX_MODE`, else `sandbox.mode`, else `SandboxMode::Off`.
+    #[must_use]
+    pub fn get_sandbox_mode(&self) -> pa_types::sandbox::SandboxMode {
+        self.merged.sandbox_mode()
+    }
+
+    /// Persist `sandbox.mode` in global settings.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the global settings file cannot be written.
+    pub fn set_sandbox_mode(&mut self, mode: pa_types::sandbox::SandboxMode) -> Result<()> {
+        self.global
+            .sandbox
+            .get_or_insert_with(Default::default)
+            .mode = Some(mode);
+        self.save_global(&["sandbox.mode"])
+    }
+
+    /// Effective sandbox network posture (global-only; unset reads as `SandboxNetworkMode::None`).
+    #[must_use]
+    pub fn get_sandbox_network(&self) -> pa_types::sandbox::SandboxNetworkMode {
+        self.merged
+            .sandbox
+            .as_ref()
+            .and_then(|sandbox| sandbox.network)
+            .unwrap_or(pa_types::sandbox::SandboxNetworkMode::None)
+    }
+
+    /// Persist `sandbox.network` in global settings.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the global settings file cannot be written.
+    pub fn set_sandbox_network(
+        &mut self,
+        network: pa_types::sandbox::SandboxNetworkMode,
+    ) -> Result<()> {
+        self.global
+            .sandbox
+            .get_or_insert_with(Default::default)
+            .network = Some(network);
+        self.save_global(&["sandbox.network"])
+    }
+
     pub fn set_packages(&mut self, packages: Vec<serde_json::Value>) {
         self.global.packages = Some(packages.clone());
         self.persist_scope_field(
@@ -1343,5 +1389,44 @@ mod tests {
         assert_eq!(manager.get_image_model(), None);
         let manager = SettingsManager::in_memory(&Settings::default());
         assert_eq!(manager.get_image_model(), None);
+    }
+
+    #[test]
+    fn sandbox_mode_and_network_default_and_persist() {
+        if std::env::var_os("PRIME_AGENT_SANDBOX_MODE").is_some() {
+            return;
+        }
+        let mut manager = SettingsManager::in_memory(&Settings::default());
+        assert_eq!(
+            manager.get_sandbox_mode(),
+            pa_types::sandbox::SandboxMode::Off
+        );
+        assert_eq!(
+            manager.get_sandbox_network(),
+            pa_types::sandbox::SandboxNetworkMode::None
+        );
+        manager
+            .set_sandbox_mode(pa_types::sandbox::SandboxMode::WorkspaceWrite)
+            .unwrap();
+        manager
+            .set_sandbox_network(pa_types::sandbox::SandboxNetworkMode::Full)
+            .unwrap();
+        assert_eq!(
+            manager.get_sandbox_mode(),
+            pa_types::sandbox::SandboxMode::WorkspaceWrite
+        );
+        assert_eq!(
+            manager.get_sandbox_network(),
+            pa_types::sandbox::SandboxNetworkMode::Full
+        );
+        manager.reload().unwrap();
+        assert_eq!(
+            manager.get_sandbox_mode(),
+            pa_types::sandbox::SandboxMode::WorkspaceWrite
+        );
+        assert_eq!(
+            manager.get_sandbox_network(),
+            pa_types::sandbox::SandboxNetworkMode::Full
+        );
     }
 }

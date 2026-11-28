@@ -84,7 +84,8 @@ impl SessionUi {
         if !crate::mouse_tracking::active() {
             return;
         }
-        let overlay_focused = view.model_picker.is_some()
+        let overlay_focused = view.approval_panel.is_some()
+            || view.model_picker.is_some()
             || view.choice_picker.is_some()
             || view.heartbeats_picker.is_some()
             || view.goal_panel.is_some()
@@ -340,6 +341,10 @@ impl SessionUi {
         // Escape itself never resets, so repeated Escape converges to the inert empty state.
         if id.is_some_and(|id| id != "escape") {
             self.escape_tree_shortcut_spent = false;
+        }
+        // The inline tool-approval panel owns the frame with highest priority.
+        if view.approval_panel.is_some() {
+            return self.handle_approval_panel_key(key, view).await;
         }
         // The `/model` picker owns the frame while open: its keys go before the
         // editor, viewport keys, and Ctrl+C.
@@ -645,6 +650,14 @@ impl SessionUi {
         }
         if view.editor.keybindings().matches(&id, "app.tools.expand") {
             self.cycle_detail(view);
+            return Ok(());
+        }
+        if view
+            .editor
+            .keybindings()
+            .matches(&id, "app.sandbox.cycleMode")
+        {
+            self.cycle_sandbox_mode(view).await;
             return Ok(());
         }
         if view
@@ -956,6 +969,7 @@ pub(crate) fn opening_echo_key_claimed(
         || kb.matches(id, "app.model.cycleForward")
         || kb.matches(id, "app.model.cycleBackward")
         || kb.matches(id, "app.tools.expand")
+        || kb.matches(id, "app.sandbox.cycleMode")
         || kb.matches(id, "app.subagents.focus")
         || kb.matches(id, "app.editor.external")
         || kb.matches(id, "app.prompt.stash")

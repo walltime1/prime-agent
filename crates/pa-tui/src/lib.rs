@@ -29,6 +29,7 @@ pub mod agents_view_state;
 pub mod altscreen;
 pub mod ansi;
 pub mod app;
+pub mod approval_panel;
 pub mod auth_panel;
 pub mod autocomplete;
 mod autolink;

@@ -60,6 +60,7 @@ impl SessionUi {
     pub(crate) fn rebuild_tray(&mut self, view: &mut AgentView) {
         view.chrome.context = self.context;
         view.chrome.chat_name = self.session_display();
+        view.chrome.sandbox_mode = self.sandbox_mode;
         self.dirty = true;
     }
 

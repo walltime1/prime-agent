@@ -1066,3 +1066,42 @@ fn the_collapsed_shells_segment_counts_persistent_shells() {
     assert_eq!(render(1), "▸ 2 shells · 1 persistent");
     assert_eq!(render(0), "▸ 2 shells");
 }
+
+#[test]
+fn tray_renders_sandbox_mode_badge_and_shift_tab_hint() {
+    let render_for = |mode: Option<pa_types::sandbox::SandboxMode>, width: usize| {
+        let state = ChromeState {
+            show_manage: true,
+            model_id: Some("faux-1".to_string()),
+            sandbox_mode: mode,
+            ..Default::default()
+        };
+        let line = render_tray(&state, &theme(), width);
+        line.iter().map(|s| s.content.as_str()).collect::<String>()
+    };
+    // `None` leaves the tray untouched.
+    let unset = render_for(None, 120);
+    assert!(!unset.contains("workspace"));
+    assert!(!unset.contains("Shift+Tab"));
+
+    // Wide tray renders badge and Shift+Tab hint.
+    for (mode, expected) in [
+        (pa_types::sandbox::SandboxMode::WorkspaceWrite, "workspace"),
+        (pa_types::sandbox::SandboxMode::ReadOnly, "read-only"),
+        (pa_types::sandbox::SandboxMode::DangerFullAccess, "yolo"),
+        (pa_types::sandbox::SandboxMode::Off, "off"),
+    ] {
+        let wide = render_for(Some(mode), 120);
+        assert!(wide.contains(expected), "{mode:?} badge missing: {wide}");
+        assert!(
+            wide.contains("(Shift+Tab)"),
+            "wide tray should include Shift+Tab hint: {wide}"
+        );
+        assert_eq!(str_width(&wide), 120);
+    }
+
+    // Narrow tray keeps the mode badge but omits the Shift+Tab hint.
+    let narrow = render_for(Some(pa_types::sandbox::SandboxMode::DangerFullAccess), 30);
+    assert!(narrow.contains("yolo"));
+    assert!(!narrow.contains("(Shift+Tab)"));
+}

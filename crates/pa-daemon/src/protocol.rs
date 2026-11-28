@@ -919,6 +919,12 @@ pub fn command_active_session_id(command: &DaemonCommand) -> Option<&str> {
         }
         | DaemonCommand::DeleteSavedSession {
             active_session_id, ..
+        }
+        | DaemonCommand::SetSandboxMode {
+            active_session_id, ..
+        }
+        | DaemonCommand::ResolveToolApproval {
+            active_session_id, ..
         } => active_session_id.as_deref(),
         // Control-plane commands carry no session selector.
         DaemonCommand::List { .. }
@@ -1027,6 +1033,8 @@ pub fn command_type_name(command: &DaemonCommand) -> &'static str {
         DaemonCommand::CycleModel { .. } => "cycle_model",
         DaemonCommand::SetScopedModels { .. } => "set_scoped_models",
         DaemonCommand::SetThinkingLevel { .. } => "set_thinking_level",
+        DaemonCommand::SetSandboxMode { .. } => "set_sandbox_mode",
+        DaemonCommand::ResolveToolApproval { .. } => "resolve_tool_approval",
         DaemonCommand::SetServiceTier { .. } => "set_service_tier",
         DaemonCommand::CycleThinkingLevel { .. } => "cycle_thinking_level",
         DaemonCommand::SetTransport { .. } => "set_transport",

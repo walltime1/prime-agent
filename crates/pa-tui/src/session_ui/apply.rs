@@ -276,6 +276,8 @@ impl SessionUi {
                     view.working = None;
                     view.retry = None;
                     view.compaction = None;
+                    view.approval_panel = None;
+                    self.pending_approvals.clear();
                     // The closed session cannot run again: its remembered
                     // settle owes the dead surface nothing.
                     self.settled = None;
@@ -434,6 +436,19 @@ impl SessionUi {
             TurnUpdate::ServiceTierChanged { tier } => {
                 self.service_tier = Some(tier);
                 view.chrome.service_tier.clone_from(&self.service_tier);
+                self.dirty = true;
+            }
+            TurnUpdate::SandboxModeChanged { mode } => {
+                self.sandbox_mode = Some(mode);
+                view.chrome.sandbox_mode = Some(mode);
+                self.dirty = true;
+            }
+            TurnUpdate::ToolApprovalRequested(request) => {
+                if view.approval_panel.is_none() {
+                    view.approval_panel = Some(crate::approval_panel::ApprovalPanel::new(request));
+                } else {
+                    self.pending_approvals.push_back(request);
+                }
                 self.dirty = true;
             }
             TurnUpdate::CustomRow(entry) => {

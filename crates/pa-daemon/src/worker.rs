@@ -676,6 +676,11 @@ impl Worker {
                         );
                     });
                 concrete.set_progress_note_emit(note_emit);
+                let sandbox_core = Arc::clone(&core);
+                let sandbox_events = events.clone();
+                concrete.set_sandbox_event_sink(Arc::new(move |event| {
+                    emit_worker_event_with(&sandbox_core, &sandbox_events, event);
+                }));
             }
             // The live roster activity feed (TS `observeRosterEvent`): busy
             // flips and trigger events coalesce into `worker_roster_delta`

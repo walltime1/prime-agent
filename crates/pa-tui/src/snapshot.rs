@@ -79,6 +79,8 @@ pub struct Reconstructed {
     /// The session's effective service tier (`state.serviceTier`), the
     /// `/fast` toggle's baseline.
     pub service_tier: Option<String>,
+    /// The session's effective sandbox posture (`state.sandboxMode`).
+    pub sandbox_mode: Option<pa_types::sandbox::SandboxMode>,
     pub model_fallback_message: Option<String>,
     /// The tail's oldest row when older history exists (the page cursor).
     pub history_before_entry_id: Option<String>,
@@ -393,6 +395,11 @@ pub fn reconstruct(attach: &AttachData) -> Reconstructed {
         .and_then(|state| state.get("serviceTier"))
         .and_then(Value::as_str)
         .map(str::to_string);
+    let sandbox_mode = state
+        .and_then(|state| state.get("sandboxMode"))
+        .and_then(|value| {
+            serde_json::from_value::<pa_types::sandbox::SandboxMode>(value.clone()).ok()
+        });
     let model_fallback_message = snapshot
         .get("summary")
         .and_then(|summary| summary.get("modelFallbackMessage"))
@@ -431,6 +438,7 @@ pub fn reconstruct(attach: &AttachData) -> Reconstructed {
         cursor_present,
         queued,
         service_tier,
+        sandbox_mode,
         model_fallback_message,
         last_user_prompt_ms,
         history_before_entry_id,

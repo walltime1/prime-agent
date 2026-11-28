@@ -571,6 +571,90 @@ impl Worker {
         self.core.lock().unwrap().retry_abort_requested = true;
         response_success(None, "abort_retry", None)
     }
+
+    /// `set_sandbox_mode { mode, network? }`: update the session's live sandbox posture
+    /// and lazily recycle the kernel on the next cell.
+    pub(crate) async fn handle_set_sandbox_mode(&self, payload: &Value) -> DaemonResponse {
+        if let Err(response) = self.require_created("set_sandbox_mode") {
+            return response;
+        }
+        let Some(mode) = payload
+            .get("mode")
+            .cloned()
+            .and_then(|value| serde_json::from_value::<pa_types::sandbox::SandboxMode>(value).ok())
+        else {
+            return response_failure(
+                None,
+                "set_sandbox_mode",
+                "set_sandbox_mode requires a valid sandbox mode",
+                None,
+            );
+        };
+        let network = match payload.get("network").filter(|value| !value.is_null()) {
+            Some(value) => {
+                match serde_json::from_value::<pa_types::sandbox::SandboxNetworkMode>(value.clone())
+                {
+                    Ok(network) => Some(network),
+                    Err(_) => {
+                        return response_failure(
+                            None,
+                            "set_sandbox_mode",
+                            "set_sandbox_mode received an invalid sandbox network mode",
+                            None,
+                        );
+                    }
+                }
+            }
+            None => None,
+        };
+        match self.engine.set_sandbox_mode(mode, network).await {
+            Ok((updated_mode, updated_network)) => response_success(
+                None,
+                "set_sandbox_mode",
+                Some(json!({
+                    "sandboxMode": updated_mode,
+                    "sandboxNetwork": updated_network,
+                })),
+            ),
+            Err(error) => response_failure(None, "set_sandbox_mode", &error.to_string(), None),
+        }
+    }
+
+    /// `resolve_tool_approval { requestId, decision }`: answer a pending interactive
+    /// tool-approval request.
+    pub(crate) fn handle_resolve_tool_approval(&self, payload: &Value) -> DaemonResponse {
+        if let Err(response) = self.require_created("resolve_tool_approval") {
+            return response;
+        }
+        let Some(request_id) = payload
+            .get("requestId")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+        else {
+            return response_failure(
+                None,
+                "resolve_tool_approval",
+                "resolve_tool_approval requires a requestId",
+                None,
+            );
+        };
+        let Some(decision) = payload.get("decision").cloned().and_then(|value| {
+            serde_json::from_value::<pa_types::sandbox::ToolApprovalDecision>(value).ok()
+        }) else {
+            return response_failure(
+                None,
+                "resolve_tool_approval",
+                "resolve_tool_approval requires a valid decision",
+                None,
+            );
+        };
+        let resolved = self.engine.resolve_tool_approval(request_id, decision);
+        response_success(
+            None,
+            "resolve_tool_approval",
+            Some(json!({ "resolved": resolved })),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -1292,5 +1376,78 @@ mod tests {
             )
             .await;
         assert!(response.success, "failed: {response:?}");
+    }
+
+    #[tokio::test]
+    async fn sandbox_mode_and_tool_approval_wire_round_trip() {
+        let dir = std::env::temp_dir().join(format!("pa-worker-sbx-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut config = worker_config(&dir);
+        config.script = None;
+        config.telemetry_disabled = Some(true);
+        let worker = Arc::new(Worker::new(config, None));
+        let created = worker
+            .dispatch("create", &json!({ "noSession": true, "cwd": dir }))
+            .await;
+        assert!(created.success, "create failed: {created:?}");
+
+        let conn_state = worker
+            .dispatch(
+                "get_connection_state",
+                &json!({ "activeSessionId": "switch-session" }),
+            )
+            .await;
+        let conn_data = conn_state.data.expect("connection state data");
+        assert_eq!(conn_data["sandboxMode"], json!("off"));
+        assert_eq!(conn_data["sandboxNetwork"], json!("none"));
+
+        let state = worker
+            .dispatch("get_state", &json!({ "activeSessionId": "switch-session" }))
+            .await;
+        let state_data = state.data.expect("state data");
+        assert_eq!(state_data["sandboxMode"], json!("off"));
+        assert_eq!(state_data["sandboxNetwork"], json!("none"));
+
+        let switched = worker
+            .dispatch(
+                "set_sandbox_mode",
+                &json!({
+                    "activeSessionId": "switch-session",
+                    "mode": "danger-full-access",
+                    "network": "full",
+                }),
+            )
+            .await;
+        assert!(switched.success, "set_sandbox_mode failed: {switched:?}");
+        assert_eq!(
+            switched.data,
+            Some(json!({
+                "sandboxMode": "danger-full-access",
+                "sandboxNetwork": "full",
+            }))
+        );
+
+        let updated_state = worker
+            .dispatch(
+                "get_connection_state",
+                &json!({ "activeSessionId": "switch-session" }),
+            )
+            .await;
+        let updated_data = updated_state.data.expect("updated connection state data");
+        assert_eq!(updated_data["sandboxMode"], json!("danger-full-access"));
+        assert_eq!(updated_data["sandboxNetwork"], json!("full"));
+
+        let resolve = worker
+            .dispatch(
+                "resolve_tool_approval",
+                &json!({
+                    "activeSessionId": "switch-session",
+                    "requestId": "missing-id",
+                    "decision": { "action": "allow-once" },
+                }),
+            )
+            .await;
+        assert!(resolve.success, "resolve_tool_approval failed: {resolve:?}");
+        assert_eq!(resolve.data, Some(json!({ "resolved": false })));
     }
 }

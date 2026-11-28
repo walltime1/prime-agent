@@ -140,6 +140,8 @@ pub(crate) async fn build_faux_engine_with(
     let engine = pa_core::session_engine::engine::create_session(
         pa_core::session_engine::engine::SessionEngineConfig {
             workspace_selection: pa_core::session_engine::engine::WorkspaceSelection::Inherit,
+            approval_gate: None,
+            on_switch_to_yolo: None,
             on_late_sent_agent_message,
             cron_store: None,
             // Faux verification harness: no product telemetry.

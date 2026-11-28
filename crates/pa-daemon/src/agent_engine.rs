@@ -118,6 +118,9 @@ pub(crate) type RefinementCompletionSink = std::sync::Arc<
         + Sync,
 >;
 
+/// Worker event sink for `tool_approval_requested` and `sandbox_mode_changed`.
+pub type SandboxEventSink = std::sync::Arc<dyn Fn(Value) + Send + Sync>;
+
 /// A [`SessionEngine`] running real agent turns.
 pub struct AgentSessionEngine {
     pub(crate) runtime: crate::async_safe_runtime::AsyncSafeRuntime,
@@ -309,4 +312,17 @@ pub struct AgentSessionEngine {
     /// re-registration stays idempotent.
     pub(crate) semantic_identity:
         std::sync::Mutex<Option<pa_core::session_engine::semantic_edges::SemanticEdgeIdentity>>,
+    /// Per-session interactive approval gate for `python_repl` cells.
+    pub(crate) approval_gate: std::sync::Arc<pa_core::sandbox::approval::SessionApprovalGate>,
+    /// Whether `set_sandbox_mode` moved the gate before the core session built.
+    pub(crate) sandbox_overridden: std::sync::atomic::AtomicBool,
+    /// Worker event sink for broadcasting `tool_approval_requested` and `sandbox_mode_changed`.
+    pub(crate) sandbox_event_sink: std::sync::Mutex<Option<SandboxEventSink>>,
+    /// Metadata for pending approval requests (kind + risky flag) used only to emit
+    /// primitive-only `tool_approval_resolved` telemetry.
+    pub(crate) pending_approval_meta: std::sync::Arc<
+        std::sync::Mutex<
+            std::collections::HashMap<String, (pa_types::sandbox::ToolApprovalKind, bool)>,
+        >,
+    >,
 }

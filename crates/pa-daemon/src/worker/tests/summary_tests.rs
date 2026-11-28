@@ -10,6 +10,8 @@ fn inputs() -> SummaryInputs {
         quota_parked: false,
         subagents_running: false,
         progress_note: None,
+        sandbox_mode: pa_types::sandbox::SandboxMode::Off,
+        sandbox_network: pa_types::sandbox::SandboxNetworkMode::None,
     }
 }
 

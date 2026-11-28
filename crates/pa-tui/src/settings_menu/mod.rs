@@ -358,6 +358,27 @@ pub fn settings_menu_rows(current: &SettingsCurrentValues) -> Vec<SettingsMenuRo
                 themes: current.available_themes.clone(),
             }),
         },
+        SettingsMenuRow {
+            id: "sandbox-mode",
+            label: "Sandbox mode",
+            description: "OS sandbox and approval posture for tool execution (Shift+Tab cycles)",
+            current: current.sandbox_mode.clone(),
+            values: Some(vec![
+                "workspace-write".into(),
+                "read-only".into(),
+                "danger-full-access".into(),
+                "off".into(),
+            ]),
+            submenu: None,
+        },
+        SettingsMenuRow {
+            id: "sandbox-network",
+            label: "Sandbox network",
+            description: "Network access allowed inside the OS sandbox",
+            current: current.sandbox_network.clone(),
+            values: Some(vec!["none".into(), "full".into()]),
+            submenu: None,
+        },
     ]
 }
 
@@ -393,6 +414,8 @@ pub struct SettingsCurrentValues {
     pub available_thinking_levels: Vec<String>,
     pub theme: String,
     pub available_themes: Vec<String>,
+    pub sandbox_mode: String,
+    pub sandbox_network: String,
 }
 
 impl SettingsMenu {

@@ -337,6 +337,29 @@ impl ClientSettings for CliClientSettings {
     fn set_telemetry_notice_shown(&self) -> Result<()> {
         self.manager().set_telemetry_notice_shown(true)
     }
+
+    fn sandbox_mode(&self) -> String {
+        self.manager().get_sandbox_mode().as_str().to_string()
+    }
+
+    fn set_sandbox_mode(&self, mode: &str) -> Result<()> {
+        let parsed: pa_types::sandbox::SandboxMode =
+            serde_json::from_value(serde_json::Value::String(mode.to_string()))
+                .map_err(|error| anyhow::anyhow!("Invalid sandbox mode \"{mode}\": {error}"))?;
+        self.manager().set_sandbox_mode(parsed)
+    }
+
+    fn sandbox_network(&self) -> String {
+        self.manager().get_sandbox_network().as_str().to_string()
+    }
+
+    fn set_sandbox_network(&self, network: &str) -> Result<()> {
+        let parsed: pa_types::sandbox::SandboxNetworkMode = serde_json::from_value(
+            serde_json::Value::String(network.to_string()),
+        )
+        .map_err(|error| anyhow::anyhow!("Invalid sandbox network mode \"{network}\": {error}"))?;
+        self.manager().set_sandbox_network(parsed)
+    }
 }
 
 #[cfg(test)]
@@ -418,5 +441,21 @@ mod tests {
             std::fs::read_to_string(agent_dir.join("settings.json")).expect("settings file");
         let value: serde_json::Value = serde_json::from_str(&content).expect("parse");
         assert_eq!(value["factory"]["enabled"], false);
+
+        assert_eq!(settings.sandbox_mode(), "off");
+        assert_eq!(settings.sandbox_network(), "none");
+        settings
+            .set_sandbox_mode("workspace-write")
+            .expect("sandbox mode");
+        settings
+            .set_sandbox_network("full")
+            .expect("sandbox network");
+        assert_eq!(settings.sandbox_mode(), "workspace-write");
+        assert_eq!(settings.sandbox_network(), "full");
+        let content =
+            std::fs::read_to_string(agent_dir.join("settings.json")).expect("settings file");
+        let value: serde_json::Value = serde_json::from_str(&content).expect("parse");
+        assert_eq!(value["sandbox"]["mode"], "workspace-write");
+        assert_eq!(value["sandbox"]["network"], "full");
     }
 }

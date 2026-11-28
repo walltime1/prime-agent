@@ -259,6 +259,10 @@ struct ProvisionerState {
     /// The last time a caller used the kernel (`ensure()`, a namespace op):
     /// the idle TTL counts from here.
     last_activity: tokio::time::Instant,
+    /// Current OS sandbox policy for kernel spawns; updated live by
+    /// [`IpythonKernelProvisioner::update_sandbox`] so the next `ensure()`
+    /// boots with the latest boundary.
+    sandbox: Option<crate::sandbox::SandboxPolicy>,
 }
 
 /// Owns one kernel for one session: starts it, memoizes the startup so concurrent callers join the
@@ -310,6 +314,7 @@ impl Drop for InFlight<'_> {
 
 impl IpythonKernelProvisioner {
     pub fn new(cwd: impl Into<PathBuf>, options: IpythonKernelProvisionerOptions) -> Self {
+        let initial_sandbox = options.sandbox.clone();
         Self {
             inner: Arc::new(ProvisionerInner {
                 cwd: cwd.into(),
@@ -327,6 +332,7 @@ impl IpythonKernelProvisioner {
                     doomed_startups: Vec::new(),
                     hibernating: None,
                     last_activity: tokio::time::Instant::now(),
+                    sandbox: initial_sandbox,
                 }),
                 dispose_signal: AbortSignal::new(),
                 in_flight: std::sync::atomic::AtomicUsize::new(0),
@@ -368,6 +374,24 @@ impl IpythonKernelProvisioner {
     #[must_use]
     pub fn has_running_kernel(&self) -> bool {
         self.manager().is_some_and(|m| m.is_running())
+    }
+
+    /// Current OS sandbox policy that the next kernel spawn will use.
+    #[must_use]
+    pub fn sandbox_policy(&self) -> Option<crate::sandbox::SandboxPolicy> {
+        self.lock_state().sandbox.clone()
+    }
+
+    /// Update the OS sandbox policy and lazily recycle any running/starting kernel
+    /// with a snapshot flush so the next `ensure()` boots under the new boundary.
+    pub async fn update_sandbox(&self, policy: Option<crate::sandbox::SandboxPolicy>) {
+        self.lock_state().sandbox = policy;
+        self.stop_kernel(Some(KernelShutdownOptions {
+            snapshot: true,
+            drain_host_requests: true,
+            only_when_idle: false,
+        }))
+        .await;
     }
 
     /// Start the kernel in the background. Failures are swallowed here and
@@ -1173,6 +1197,7 @@ async fn start_kernel_impl(
     let stderr_log_path = snapshot_dir
         .as_ref()
         .map(|dir| dir.join("kernel-stderr.log"));
+    let sandbox = inner.lock_state().sandbox.clone();
     let manager = ReplKernelManager::new(KernelManagerOptions {
         python: options.python.clone(),
         cwd: Some(cwd),
@@ -1180,7 +1205,7 @@ async fn start_kernel_impl(
         session_id: options.session_id.clone(),
         host_handlers: options.host_handlers.clone(),
         python_skills: options.python_skills.clone(),
-        sandbox: options.sandbox.clone(),
+        sandbox,
         on_sandbox_started: options.on_sandbox_started.clone(),
         on_background_work_settled: options.on_background_work_settled.clone(),
         snapshot,

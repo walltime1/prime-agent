@@ -493,10 +493,16 @@ fn convert_execute_result(
 pub fn ipython_tool_options(
     provisioner: Arc<KernelProvisioner>,
     on_late_sent_agent_message: Option<crate::tools::ipython::LateSentAgentMessageHandler>,
+    approval_gate: Option<Arc<crate::sandbox::approval::SessionApprovalGate>>,
+    cwd: std::path::PathBuf,
+    on_switch_to_yolo: Option<crate::tools::ipython::OnSwitchToYolo>,
 ) -> IpythonToolOptions {
     IpythonToolOptions {
         provisioner,
         on_late_sent_agent_message,
+        approval_gate,
+        cwd,
+        on_switch_to_yolo,
     }
 }
 

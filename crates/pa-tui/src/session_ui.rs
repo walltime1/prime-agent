@@ -209,6 +209,8 @@ pub(crate) struct SessionUi {
     /// `None` until the first sample, a rebind restarts it.
     speed_stats: Option<SpeedStats>,
     service_tier: Option<String>,
+    sandbox_mode: Option<pa_types::sandbox::SandboxMode>,
+    pending_approvals: std::collections::VecDeque<pa_types::sandbox::ToolApprovalRequest>,
     pending_model_fallback_message: Option<String>,
     client_settings: Option<std::sync::Arc<dyn crate::client_settings::ClientSettings>>,
     /// The ban-risk warning's view-local dedup (TS

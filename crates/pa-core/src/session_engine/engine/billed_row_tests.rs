@@ -30,6 +30,8 @@ async fn scripted_engine(
     std::fs::create_dir_all(&cwd).unwrap();
     let engine = create_session(SessionEngineConfig {
         workspace_selection: WorkspaceSelection::Inherit,
+        approval_gate: None,
+        on_switch_to_yolo: None,
         on_late_sent_agent_message: None,
         semantic_edges: None,
         cron_store: None,

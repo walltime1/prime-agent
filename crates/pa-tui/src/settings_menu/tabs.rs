@@ -24,6 +24,8 @@ const TAB_LAYOUT: &[TabLayout] = &[
             "quiet-startup",
             "warnings",
             "autocompact-threshold",
+            "sandbox-mode",
+            "sandbox-network",
         ],
     },
     TabLayout {
